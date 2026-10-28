@@ -1,0 +1,52 @@
+[package]
+name = "claudralingo"
+authors = ["Seb Ospina <kraige@gmail.com>"]
+version = "0.1.0"
+edition = "2024"
+# The exercises and the tutor logic are ported from Klavaro, GPL-3.0-or-later.
+license = "GPL-3.0-or-later"
+description = "A touch typing tutor in Bevy, Chinese hanzi calligraphy later"
+
+[dependencies]
+# No "bevy/dynamic_linking": the binaries are built on wormgat or corvid-zt and copied to portia-zt.
+bevy = { version = "0.20.0", default-features = false, features = [
+    "ui",
+    "bevy_feathers",
+] }
+fastrand = "2.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = { version = "0.4", features = [
+    "max_level_debug",
+    "release_max_level_warn",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+fastrand = { version = "2.3", features = ["js"] }
+web-sys = { version = "0.3", features = ["Window", "Storage"] }
+js-sys = "0.3"
+
+[features]
+default = []
+# Bevy development helpers, not used in the release builds.
+dev = ["bevy/bevy_dev_tools", "bevy/track_location"]
+
+# Small optimization for our code, full optimization for the dependencies.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+# trunk build --release uses this profile for the browser build, see index.html.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+strip = "debuginfo"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bevy_lint)"] }

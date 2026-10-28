@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claudralingo</title>
+  <link data-trunk rel="rust" data-bin="claudralingo" data-cargo-profile-release="wasm-release" data-wasm-opt="s" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #1f1f24; overflow: hidden; }
+    #claudralingo { width: 100%; height: 100%; display: block; outline: none; }
+  </style>
+</head>
+<body>
+  <canvas id="claudralingo" tabindex="0"></canvas>
+  <script>
+    // The typing goes to the canvas, focus it on load and on click.
+    const canvas = document.getElementById('claudralingo');
+    window.addEventListener('load', () => canvas.focus());
+    canvas.addEventListener('pointerdown', () => canvas.focus());
+  </script>
+</body>
+</html>
