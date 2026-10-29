@@ -123,13 +123,16 @@ fn hands_gap(layout: &Layout) -> f32 {
     if layout.blocks.iter().filter(|b| b.rows.len() > 2).count() > 1 { 150.0 } else { 70.0 }
 }
 
+type FingerView<'a> =
+    (Entity, &'a Finger, &'a mut BackgroundColor, &'a mut BorderColor, &'a mut UiTransform, Has<BoxShadow>);
+
 fn update_hands(
     coach: Res<Coach>,
     layout: Res<ActiveLayout>,
     theme: Res<UiTheme>,
     time: Res<Time>,
     mut roots: Query<&mut Node, With<HandsRoot>>,
-    mut fingers: Query<(Entity, &Finger, &mut BackgroundColor, &mut BorderColor, &mut UiTransform, Has<BoxShadow>)>,
+    mut fingers: Query<FingerView>,
     mut commands: Commands,
 ) {
     let layout = &layout.0;

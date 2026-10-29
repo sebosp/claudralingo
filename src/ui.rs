@@ -495,12 +495,14 @@ fn display_char(c: char) -> String {
     }
 }
 
+type PromptOnly = (With<PromptRoot>, Without<ShortcutsRoot>, Without<MessageText>);
+
 /// The text of the typing exercises or the tasks of the shortcuts, the results at the end.
 fn show_mode_views(
     progress: Res<Progress>,
     exercise: Res<Exercise>,
     drill: Res<Drill>,
-    mut prompts: Query<&mut Node, (With<PromptRoot>, Without<ShortcutsRoot>, Without<MessageText>)>,
+    mut prompts: Query<&mut Node, PromptOnly>,
     mut shortcuts: Query<&mut Node, (With<ShortcutsRoot>, Without<MessageText>)>,
     mut messages: Query<&mut Node, With<MessageText>>,
 ) {
