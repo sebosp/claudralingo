@@ -309,9 +309,21 @@ fn read_keys(
     mut modifiers: ResMut<Modifiers>,
     mut panel: ResMut<crate::ui::Panel>,
     mut pressed: MessageWriter<KeyPressed>,
+    mut zoom: MessageWriter<crate::zoom::Zoom>,
 ) {
     for event in events.read() {
         let down = event.state == ButtonState::Pressed;
+        // Ctrl+= Ctrl+- Ctrl+0 zoom, as in the browsers, the browser itself zooms on the web.
+        let mods = modifiers.mods;
+        if mods.ctrl
+            && !mods.alt
+            && let Some(change) = crate::zoom::Zoom::of_key(&event.logical_key)
+        {
+            if down && !cfg!(target_arch = "wasm32") {
+                zoom.write(change);
+            }
+            continue;
+        }
         // F1 opens and closes the help, Esc closes the help and the settings, they take the
         // other keys.
         let open = *panel != crate::ui::Panel::None;

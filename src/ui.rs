@@ -20,6 +20,7 @@ use crate::layout::{LayoutId, finger_name};
 use crate::progress::{BackgroundLevel, ExerciseMode, Progress};
 use crate::shortcuts::Drill;
 use crate::theme::{ThemeMode, tokens};
+use crate::zoom::Zoom;
 
 #[derive(Component, Default, Clone)]
 pub struct PromptRoot;
@@ -83,6 +84,9 @@ struct SettingControl(Setting);
 struct SuggestButton;
 
 #[derive(Component, Default, Clone)]
+struct ZoomLabel;
+
+#[derive(Component, Default, Clone)]
 struct HelpOverlay;
 
 #[derive(Component, Default, Clone)]
@@ -112,12 +116,13 @@ MODES, the first menu
 
 TOOLBAR
   ‹ ›  the lesson, the finger or the hand    Restart  a new text
-  Settings  the keyboard, dark mode, the background, motion, hands, text size and:
+  Settings  the keyboard, dark mode, the background, motion, hands, text size, zoom and:
     Fade legends  the letters fade while you type well, an error or a pause shows the next key
     Layer trainer  always shows the layer and the modifier keys to hold
 
 TYPING
   Backspace erases the errors, Ctrl+Backspace all of them
+  Zoom: Ctrl and the mouse wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0, or the Settings
   At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill
 
 COLORS
@@ -154,6 +159,7 @@ impl Plugin for UiPlugin {
                 show_panels.run_if(resource_changed::<Panel>),
                 show_hands,
                 update_rankings.run_if(resource_changed::<Progress>),
+                update_zoom_label.run_if(resource_changed::<Progress>),
             )
                 .after(crate::game::GameSystems),
         );
@@ -441,6 +447,34 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     --
                     @setting_checkbox(Setting::LargeText, "Large text to type")
                     --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(8),
+                    }
+                    Children [
+                        @label("Zoom") Node { min_width: px(110) }
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @caption("−") }
+                        }
+                        on(zoom_out)
+                        --
+                        @label("100%") ZoomLabel Node { min_width: px(48), justify_content: JustifyContent::Center }
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @caption("+") }
+                        }
+                        on(zoom_in)
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @caption("Reset") }
+                        }
+                        on(zoom_reset)
+                    ]
+                    --
+                    @label_dim("Or Ctrl and the mouse wheel, a pinch of the trackpad, Ctrl+= Ctrl+- Ctrl+0")
+                    --
                     @FeathersButton {
                         @caption: bsn! { @caption("Close") }
                         @variant: ButtonVariant::Primary,
@@ -701,6 +735,30 @@ fn next_lesson(
     change_lesson(&mut progress, 1);
     new_exercise.write_default();
     release_focus(&mut focus);
+}
+
+fn zoom_in(_: On<Activate>, mut zoom: MessageWriter<Zoom>, mut focus: ResMut<InputFocus>) {
+    zoom.write(Zoom::IN);
+    release_focus(&mut focus);
+}
+
+fn zoom_out(_: On<Activate>, mut zoom: MessageWriter<Zoom>, mut focus: ResMut<InputFocus>) {
+    zoom.write(Zoom::OUT);
+    release_focus(&mut focus);
+}
+
+fn zoom_reset(_: On<Activate>, mut zoom: MessageWriter<Zoom>, mut focus: ResMut<InputFocus>) {
+    zoom.write(Zoom::Reset);
+    release_focus(&mut focus);
+}
+
+fn update_zoom_label(progress: Res<Progress>, mut labels: Query<&mut Text, With<ZoomLabel>>) {
+    for mut text in &mut labels {
+        let percent = crate::zoom::percent(progress.zoom);
+        if text.0 != percent {
+            text.0 = percent;
+        }
+    }
 }
 
 fn restart(_: On<Activate>, mut new_exercise: MessageWriter<NewExercise>, mut focus: ResMut<InputFocus>) {

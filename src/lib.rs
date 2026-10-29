@@ -16,6 +16,7 @@ pub mod shortcuts;
 pub mod theme;
 pub mod ui;
 pub mod zmk;
+pub mod zoom;
 
 pub struct ClaudralingoPlugin;
 
@@ -32,6 +33,7 @@ impl Plugin for ClaudralingoPlugin {
             effects::EffectsPlugin,
             shortcuts::ShortcutsPlugin,
             background::BackgroundPlugin,
+            zoom::ZoomPlugin,
         ));
     }
 }

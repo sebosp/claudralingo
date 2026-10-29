@@ -80,8 +80,9 @@ key is on Lower or Raise; "Focus" under "Your keys" names them. Under the text t
 hands the lines blur away.
 
 Settings (toolbar): the keyboard, dark mode, the background (off, subtle, lively), fade legends,
-layer trainer, the hands, reduce motion (no drift, sparks, shakes nor breathing keys) and a large
-text to type.
+layer trainer, the hands, reduce motion (no drift, sparks, shakes nor breathing keys), a large
+text to type and the zoom of the whole window (50% to 300%, saved). The zoom also follows Ctrl and
+the mouse wheel, a trackpad pinch, Ctrl+= Ctrl+- Ctrl+0; in the browser its own zoom does that.
 
 ### Finger drills
 
