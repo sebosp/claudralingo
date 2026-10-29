@@ -120,7 +120,7 @@ fn spawn_hands(roots: Query<Entity, Added<HandsRoot>>, mut commands: Commands) {
 
 /// The hands sit under the halves of a split keyboard, closer under a single block.
 fn hands_gap(layout: &Layout) -> f32 {
-    if layout.blocks.iter().filter(|b| b.rows.len() > 2).count() > 1 { 150.0 } else { 70.0 }
+    if layout.split { 150.0 } else { 70.0 }
 }
 
 type FingerView<'a> =

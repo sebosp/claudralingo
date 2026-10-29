@@ -1,9 +1,10 @@
 //! The keyboard layouts shown on the screen.
 //!
+//! A layout is a list of keys with their physical position (as the ZMK physical layouts: x, y,
+//! width, height and a rotation around a point, in key units) and what they type on every layer.
 //! The QWERTY layout is made from the grid of Klavaro's `qwerty_us.kbd`, with the modifiers, the
-//! escape key and the navigation keys around it. The Corne is a split 3x5+3 keyboard (36 keys)
-//! with a QWERTY base layer and home row modifiers, the numbers, the symbols and the navigation
-//! keys live on the Lower and Raise layers held with the thumbs.
+//! escape key and the navigation keys around it. The Corne 3x5+3 is the default 5 column keymap
+//! of the Typeractive wireless Corne, parsed from its ZMK bindings, see [`crate::zmk`].
 use serde::{Deserialize, Serialize};
 
 use crate::klavaro::{BACKSPACE, KbdGrid, UPSYM};
@@ -64,7 +65,11 @@ pub enum Special {
     Insert,
     Ctrl,
     Alt,
+    /// The Windows or Command key, ZMK's GUI.
     Super,
+    /// Selects a Bluetooth profile, from 0.
+    Bluetooth(u8),
+    BluetoothClear,
 }
 
 impl Special {
@@ -75,6 +80,9 @@ impl Special {
             Special::Shift => "⇧".into(),
             Special::Space => "Spc".into(),
             Special::Insert => "Ins".into(),
+            Special::Super => "Win".into(),
+            Special::Bluetooth(n) => format!("BT{}", n + 1),
+            Special::BluetoothClear => "BT×".into(),
             special => special.name(layer_names),
         }
     }
@@ -102,7 +110,9 @@ impl Special {
             Special::Insert => "Insert",
             Special::Ctrl => "Ctrl",
             Special::Alt => "Alt",
-            Special::Super => "Super",
+            Special::Super => "GUI (Win/Cmd)",
+            Special::Bluetooth(n) => return format!("Bluetooth {}", n + 1),
+            Special::BluetoothClear => "Bluetooth clear",
         }
         .into()
     }
@@ -252,10 +262,45 @@ pub struct KeySpec {
     pub finger: u8,
     pub row: Row,
     pub left: bool,
-    /// In key units.
-    pub width: f32,
-    /// Vertical offset in key units, for the column stagger of the split keyboards.
-    pub y_offset: f32,
+    pub pos: KeyPos,
+}
+
+/// The physical position of a key, in key units, as in the ZMK physical layouts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyPos {
+    /// The top left corner before the rotation.
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    /// Clockwise, in degrees, around `(rx, ry)`.
+    pub rot: f32,
+    pub rx: f32,
+    pub ry: f32,
+}
+
+impl KeyPos {
+    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        KeyPos { x, y, w, h, rot: 0.0, rx: 0.0, ry: 0.0 }
+    }
+
+    fn rotate(&self, (px, py): (f32, f32)) -> (f32, f32) {
+        let (sin, cos) = self.rot.to_radians().sin_cos();
+        let (dx, dy) = (px - self.rx, py - self.ry);
+        // Clockwise on the screen, the y axis goes down.
+        (self.rx + dx * cos - dy * sin, self.ry + dx * sin + dy * cos)
+    }
+
+    /// The center of the key after the rotation, a rotated key turns around its center there.
+    pub fn center(&self) -> (f32, f32) {
+        self.rotate((self.x + self.w / 2.0, self.y + self.h / 2.0))
+    }
+
+    /// The corners after the rotation, for the bounding boxes.
+    pub fn corners(&self) -> [(f32, f32); 4] {
+        let (x, y, w, h) = (self.x, self.y, self.w, self.h);
+        [(x, y), (x + w, y), (x + w, y + h), (x, y + h)].map(|p| self.rotate(p))
+    }
 }
 
 impl KeySpec {
@@ -268,10 +313,10 @@ impl KeySpec {
     }
 
     pub fn legend(&self, layer: u8, shift: bool, layer_names: &[&str]) -> String {
-        if self.special == Some(Special::Space) && self.width >= 2.0 {
+        if self.special == Some(Special::Space) && self.pos.w >= 2.0 {
             return "Space".into();
         }
-        if let Some(special) = self.special.or_else(|| self.special_on(layer)) {
+        if let Some(special) = self.special_on(layer).or(self.special) {
             return special.legend(layer_names);
         }
         match self.outputs.get(layer as usize).copied().flatten() {
@@ -302,13 +347,22 @@ impl KeySpec {
     }
 }
 
-/// A group of rows drawn together, a whole keyboard or the half of a split one.
+/// A group of keys drawn on one case: a whole keyboard, the half of a split one, a cluster.
 #[derive(Debug, Clone)]
 pub struct Block {
-    /// Indices into [`Layout::keys`], with the left offset of the row in key units.
-    pub rows: Vec<(f32, Vec<usize>)>,
-    /// The tilt of the block in degrees, clockwise.
-    pub tilt: f32,
+    /// Indices into [`Layout::keys`].
+    pub keys: Vec<usize>,
+}
+
+impl Block {
+    /// The bounding box of the keys, rotations included: min x, min y, max x, max y.
+    pub fn bounds(&self, keys: &[KeySpec]) -> (f32, f32, f32, f32) {
+        let mut b = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y) in self.keys.iter().flat_map(|k| keys[*k].pos.corners()) {
+            b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+        }
+        b
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +373,8 @@ pub struct Layout {
     pub layer_names: Vec<&'static str>,
     /// The size of a key unit in logical pixels.
     pub unit: f32,
+    /// Two halves, one per hand.
+    pub split: bool,
     /// The firmware shifts a character when its key is held a moment longer, the shift key is
     /// only for the chords.
     pub auto_shift: bool,
@@ -453,6 +509,21 @@ impl Layout {
         })
     }
 
+    /// Every key of the target exists on this layout: Ctrl+Shift+→ needs a shift key, the
+    /// keymaps with auto shift may have none.
+    pub fn can_press(&self, target: Target) -> bool {
+        let Some(plan) = self.plan(target) else {
+            return false;
+        };
+        let held = match target {
+            Target::Chord(chord) => chord.mods.held().count(),
+            Target::Char(_) => 0,
+        };
+        (!plan.shift || plan.auto_shift || plan.shift_key.is_some())
+            && (plan.layer == 0 || plan.layer_key.is_some())
+            && plan.mods.len() == held
+    }
+
     /// How to press a plan, for the layer trainer.
     pub fn describe(&self, plan: &Plan) -> String {
         let names = &self.layer_names;
@@ -475,7 +546,9 @@ impl Layout {
         let key = &self.keys[plan.key];
         let legend = key.legend(plan.layer, plan.shift, names);
         let place = format!("{}, {}", finger(plan.key), key.row.name());
-        let press = if plan.auto_shift {
+        let press = if plan.auto_shift && plan.layer > 0 {
+            format!("hold {legend} a moment longer where {} is, auto shift ({place})", key.base_name(names))
+        } else if plan.auto_shift {
             format!("hold {legend} a moment longer, auto shift ({place})")
         } else if plan.layer > 0 {
             format!("press {legend} where {} is ({place})", key.base_name(names))
@@ -535,8 +608,7 @@ fn char_key(lo: char, up: char, finger: u8, row: Row, width: f32) -> KeySpec {
         finger,
         row,
         left: finger < 5,
-        width,
-        y_offset: 0.0,
+        pos: KeyPos::new(0.0, 0.0, width, 1.0),
     }
 }
 
@@ -549,8 +621,17 @@ fn special_key(special: Special, finger: u8, left: bool, width: f32) -> KeySpec 
         finger,
         row: Row::Other,
         left,
-        width,
-        y_offset: 0.0,
+        pos: KeyPos::new(0.0, 0.0, width, 1.0),
+    }
+}
+
+/// Puts the keys side by side from `x` on the row `y`.
+fn place_row(keys: &mut [KeySpec], row: &[usize], x: f32, y: f32) {
+    let mut x = x;
+    for k in row {
+        keys[*k].pos.x = x;
+        keys[*k].pos.y = y;
+        x += keys[*k].pos.w;
     }
 }
 
@@ -566,7 +647,7 @@ const QWERTY_FINGERS: [[u8; 14]; 4] = [
 /// the modifiers and the navigation keys of a full size keyboard.
 pub fn qwerty(grid: &KbdGrid) -> Layout {
     let mut keys = Vec::new();
-    let mut rows = Vec::new();
+    let mut rows: Vec<Vec<usize>> = Vec::new();
     let push = |keys: &mut Vec<KeySpec>, key: KeySpec| {
         keys.push(key);
         keys.len() - 1
@@ -575,22 +656,22 @@ pub fn qwerty(grid: &KbdGrid) -> Layout {
     let grid_key = |i: usize, j: usize, width: f32| {
         char_key(grid.lochars[i][j], grid.upchars[i][j], QWERTY_FINGERS[i][j], GRID_ROWS[i], width)
     };
-    rows.push((0.0, vec![push(&mut keys, special_key(Special::Escape, 1, true, 1.0))]));
+    rows.push(vec![push(&mut keys, special_key(Special::Escape, 1, true, 1.0))]);
     let mut row: Vec<usize> = (0..13).map(|j| push(&mut keys, grid_key(0, j, 1.0))).collect();
     row.push(push(&mut keys, special_key(Special::Backspace, 9, false, 2.0)));
-    rows.push((0.0, row));
+    rows.push(row);
     let mut row = vec![push(&mut keys, special_key(Special::Tab, 1, true, 1.5))];
     row.extend((0..13).map(|j| push(&mut keys, grid_key(1, j, if j == 12 { 1.5 } else { 1.0 }))));
-    rows.push((0.0, row));
+    rows.push(row);
     let mut row = vec![push(&mut keys, special_key(Special::Caps, 1, true, 1.75))];
     row.extend((0..11).map(|j| push(&mut keys, grid_key(2, j, 1.0))));
     row.push(push(&mut keys, special_key(Special::Enter, 9, false, 2.25)));
-    rows.push((0.0, row));
+    rows.push(row);
     // The first column of the grid is the extra key of the ISO keyboards.
     let mut row = vec![push(&mut keys, special_key(Special::Shift, 1, true, 2.25))];
     row.extend((1..11).map(|j| push(&mut keys, grid_key(3, j, 1.0))));
     row.push(push(&mut keys, special_key(Special::Shift, 9, false, 2.75)));
-    rows.push((0.0, row));
+    rows.push(row);
     let bottom = [
         (Special::Ctrl, 1, true, 1.25),
         (Special::Super, 1, true, 1.25),
@@ -600,126 +681,129 @@ pub fn qwerty(grid: &KbdGrid) -> Layout {
         (Special::Super, 9, false, 1.25),
         (Special::Ctrl, 9, false, 2.5),
     ];
-    let row = bottom.map(|(special, finger, left, width)| push(&mut keys, special_key(special, finger, left, width)));
-    rows.push((0.0, row.to_vec()));
+    rows.push(bottom.map(|(special, finger, left, width)| push(&mut keys, special_key(special, finger, left, width))).to_vec());
+    for (y, row) in rows.iter().enumerate() {
+        place_row(&mut keys, row, 0.0, y as f32);
+    }
     for key in &mut keys {
         if key.special == Some(Special::Space) || key.special == Some(Special::Alt) {
             key.row = Row::Thumb;
         }
     }
-    let main = Block { rows, tilt: 0.0 };
+    let main = Block { keys: (0..keys.len()).collect() };
 
-    // The navigation keys of the right pinky, the arrows of the right hand.
-    let mut nav = |specials: &[Special], y_offset: f32, finger: u8| -> Vec<usize> {
-        specials
-            .iter()
-            .map(|s| {
-                let mut key = special_key(*s, finger, false, 1.0);
-                key.y_offset = y_offset;
-                push(&mut keys, key)
-            })
-            .collect()
-    };
-    // The offsets line the clusters up with the number and the bottom rows.
-    let nav_rows = vec![
-        (0.0, nav(&[Special::Insert, Special::Home, Special::PageUp], 1.1, 9)),
-        (0.0, nav(&[Special::Delete, Special::End, Special::PageDown], 0.0, 9)),
-        (1.11, nav(&[Special::Up], 1.11, 7)),
-        (0.0, nav(&[Special::Left, Special::Down, Special::Right], 0.0, 7)),
+    // The navigation keys of the right pinky, the arrows of the right hand, lined up with the
+    // number and the bottom rows.
+    let first_nav = keys.len();
+    let nav = [
+        (Special::Insert, 0.0, 1.0, 9),
+        (Special::Home, 1.0, 1.0, 9),
+        (Special::PageUp, 2.0, 1.0, 9),
+        (Special::Delete, 0.0, 2.0, 9),
+        (Special::End, 1.0, 2.0, 9),
+        (Special::PageDown, 2.0, 2.0, 9),
+        (Special::Up, 1.0, 4.0, 7),
+        (Special::Left, 0.0, 5.0, 6),
+        (Special::Down, 1.0, 5.0, 7),
+        (Special::Right, 2.0, 5.0, 8),
     ];
-    let left_arrow = keys.len() - 3;
-    keys[left_arrow].finger = 6;
-    keys[left_arrow + 2].finger = 8;
+    for (special, x, y, finger) in nav {
+        let mut key = special_key(special, finger, false, 1.0);
+        key.pos = KeyPos::new(x, y, 1.0, 1.0);
+        keys.push(key);
+    }
+    let nav = Block { keys: (first_nav..keys.len()).collect() };
     Layout {
         id: LayoutId::QwertyUs,
         keys,
-        blocks: vec![main, Block { rows: nav_rows, tilt: 0.0 }],
+        blocks: vec![main, nav],
         layer_names: vec!["Base"],
         unit: 44.0,
+        split: false,
         auto_shift: false,
     }
 }
 
-/// Corne 3x5+3, with auto shift: QWERTY on the base layer with Super, Alt and Ctrl on the home rows (A S D and
-/// ; L K), numbers and shifted numbers on Lower, brackets, Escape, Tab and the navigation keys on
-/// Raise. Thumbs: Shift, Lower and Space on the left, Enter, Raise and Backspace on the right.
+/// The default 5 column keymap of the Typeractive wireless Corne, `config/corne.keymap` of
+/// <https://github.com/typeractivexyz/corne-wireless-5-col-zmk-config>: auto shift on the
+/// letters (`AS`), Ctrl and Alt on the right bottom row, GUI, Lower and Space on the left thumbs,
+/// Enter, Raise and Backspace on the right ones, symbols and arrows on Lower, numbers and brackets
+/// on Raise.
+const CORNE_5COL_KEYMAP: [&str; 3] = [
+    "AS(Q) AS(W) AS(E) AS(R) AS(T)     AS(Y)   AS(U)  AS(I)     AS(O)     AS(P)
+     AS(A) AS(S) AS(D) AS(F) AS(G)     AS(H)   AS(J)  AS(K)     AS(L)     AS(SQT)
+     AS(Z) AS(X) AS(C) AS(V) AS(B)     AS(N)   AS(M)  &kp LCTL  &kp RALT  AS(DOT)
+          &kp LGUI &mo 1 &kp SPACE     AS(RET) &mo 2  &kp BSPC",
+    "&kp EXCL     &kp AT       &kp HASH     &kp DLLR     &kp PRCNT        &kp CARET &kp AMPS  &kp KP_MULTIPLY &kp LPAR  &kp RPAR
+     &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2 &bt BT_SEL 3 &bt BT_SEL 4     &kp LEFT  &kp DOWN  &kp UP          &kp RIGHT &trans
+     &bt BT_CLR   &trans       &trans       &trans       &trans           &trans    &trans    &trans          &trans    &trans
+                               &kp LGUI     &trans       &kp SPACE        AS(RET)   &kp ESC   &kp TAB",
+    "AS(N1)    AS(N2)    AS(N3)    AS(N4)    AS(N5)        AS(N6)    AS(N7)    AS(N8)    AS(N9)   AS(N0)
+     AS(MINUS) AS(EQUAL) &kp LBRC  &kp LBKT  &kp LPAR      &kp RPAR  &kp RBKT  &kp RBRC  AS(FSLH) AS(BSLH)
+     AS(GRAVE) &trans    &trans    AS(COMMA) &kp COLON     &kp SEMI  AS(DOT)   &kp LCTRL &kp RALT &trans
+                         &kp LGUI  &kp ESC   &kp SPACE     AS(RET)   &trans    &kp TAB",
+];
+
+/// `foostan_corne_5col_layout` of ZMK (`app/dts/layouts/foostan/corne/5column.dtsi`), in
+/// hundredths of a key: x, y, w, h, rotation in hundredths of a degree, rotation point.
+#[rustfmt::skip]
+const CORNE_5COL_PHYSICAL: [(i32, i32, i32, i32, i32, i32, i32); 36] = [
+    (0, 37, 100, 100, 0, 0, 0), (100, 12, 100, 100, 0, 0, 0), (200, 0, 100, 100, 0, 0, 0),
+    (300, 12, 100, 100, 0, 0, 0), (400, 24, 100, 100, 0, 0, 0), (700, 24, 100, 100, 0, 0, 0),
+    (800, 12, 100, 100, 0, 0, 0), (900, 0, 100, 100, 0, 0, 0), (1000, 12, 100, 100, 0, 0, 0),
+    (1100, 37, 100, 100, 0, 0, 0), (0, 137, 100, 100, 0, 0, 0), (100, 112, 100, 100, 0, 0, 0),
+    (200, 100, 100, 100, 0, 0, 0), (300, 112, 100, 100, 0, 0, 0), (400, 124, 100, 100, 0, 0, 0),
+    (700, 124, 100, 100, 0, 0, 0), (800, 112, 100, 100, 0, 0, 0), (900, 100, 100, 100, 0, 0, 0),
+    (1000, 112, 100, 100, 0, 0, 0), (1100, 137, 100, 100, 0, 0, 0), (0, 237, 100, 100, 0, 0, 0),
+    (100, 212, 100, 100, 0, 0, 0), (200, 200, 100, 100, 0, 0, 0), (300, 212, 100, 100, 0, 0, 0),
+    (400, 224, 100, 100, 0, 0, 0), (700, 224, 100, 100, 0, 0, 0), (800, 212, 100, 100, 0, 0, 0),
+    (900, 200, 100, 100, 0, 0, 0), (1000, 212, 100, 100, 0, 0, 0), (1100, 237, 100, 100, 0, 0, 0),
+    (250, 312, 100, 100, 0, 0, 0), (350, 312, 100, 100, 1200, 350, 412),
+    (448, 283, 100, 150, 2400, 448, 433), (652, 283, 100, 150, -2400, 752, 433),
+    (750, 312, 100, 100, -1200, 850, 412), (850, 312, 100, 100, 0, 0, 0),
+];
+
+/// Corne 3x5+3 with the Typeractive default keymap.
 pub fn corne36() -> Layout {
-    const BASE: [&str; 6] = ["qwert", "asdfg", "zxcvb", "yuiop", "hjkl;", "nm,./"];
-    const BASE_UP: [&str; 6] = ["QWERT", "ASDFG", "ZXCVB", "YUIOP", "HJKL:", "NM<>?"];
-    const LOWER: [&str; 6] = ["12345", "!@#$%", "`~'\"\\", "67890", "^&*()", "|-_=+"];
-    const RAISE: [&str; 6] = ["     ", "     ", "     ", "[]{} ", "     ", "     "];
-    use Special::*;
-    const RAISE_SPECIALS: [[Option<Special>; 5]; 6] = [
-        [Some(Escape), Some(Tab), Some(Home), Some(End), Some(Delete)],
-        [None; 5],
-        [None; 5],
-        [None; 5],
-        [Some(Left), Some(Down), Some(Up), Some(Right), None],
-        [Some(PageUp), Some(PageDown), Some(Insert), None, None],
-    ];
+    let layers: Vec<Vec<crate::zmk::Binding>> =
+        CORNE_5COL_KEYMAP.iter().map(|layer| crate::zmk::parse_bindings(layer)).collect();
     // From the outer to the inner column of a half.
-    const HOLDS: [Option<Special>; 5] = [Some(Super), Some(Alt), Some(Ctrl), None, None];
-    const STAGGER: [f32; 5] = [0.35, 0.12, 0.0, 0.12, 0.22];
     const LEFT_FINGERS: [u8; 5] = [1, 2, 3, 4, 4];
     const ROWS: [Row; 3] = [Row::Top, Row::Home, Row::Bottom];
-
-    let mut keys = Vec::new();
-    let mut blocks = Vec::new();
-    for half in 0..2 {
-        let mut rows = Vec::new();
-        for (r, row_kind) in ROWS.into_iter().enumerate() {
-            let idx = half * 3 + r;
-            let (lo, up) = (BASE[idx].chars().collect::<Vec<_>>(), BASE_UP[idx].chars().collect::<Vec<_>>());
-            let (lower, raise) = (LOWER[idx].chars().collect::<Vec<_>>(), RAISE[idx].chars().collect::<Vec<_>>());
-            let mut row = Vec::new();
-            for c in 0..5 {
-                // The stagger, the fingers and the home row mods mirror on the right half.
-                let outer = if half == 0 { c } else { 4 - c };
-                let layer_output = |ch: char| (ch != ' ').then_some(Output { lo: ch, up: ch });
-                keys.push(KeySpec {
-                    outputs: vec![
-                        Some(Output { lo: lo[c], up: up[c] }),
-                        layer_output(lower[c]),
-                        layer_output(raise[c]),
-                    ],
-                    special: None,
-                    layer_specials: vec![None, None, RAISE_SPECIALS[idx][c]],
-                    hold: if r == 1 { HOLDS[outer] } else { None },
-                    finger: if half == 0 { LEFT_FINGERS[outer] } else { 10 - LEFT_FINGERS[outer] },
-                    row: row_kind,
-                    left: half == 0,
-                    width: 1.0,
-                    y_offset: STAGGER[outer],
-                });
-                row.push(keys.len() - 1);
-            }
-            rows.push((0.0, row));
-        }
-        let thumbs = if half == 0 {
-            [Shift, Layer(1), Space]
-        } else {
-            [Enter, Layer(2), Backspace]
-        };
-        let mut row = Vec::new();
-        for (t, special) in thumbs.into_iter().enumerate() {
-            let mut key = special_key(special, 5, half == 0, 1.0);
-            key.row = Row::Thumb;
-            // The thumb keys fan out from the middle of the keyboard.
-            let from_inner = if half == 0 { 2 - t } else { t };
-            key.y_offset = 0.25 + 0.12 * from_inner as f32;
-            keys.push(key);
-            row.push(keys.len() - 1);
-        }
-        rows.push((if half == 0 { 2.2 } else { -0.2 }, row));
-        // No tilt: the rotated nodes of bevy_ui have jagged edges, and the real halves are straight.
-        blocks.push(Block { rows, tilt: 0.0 });
-    }
+    let keys: Vec<KeySpec> = CORNE_5COL_PHYSICAL
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, y, w, h, rot, rx, ry))| {
+            let (row, left, finger) = if i < 30 {
+                let column = i % 10;
+                let left = column < 5;
+                let finger = if left { LEFT_FINGERS[column] } else { 10 - LEFT_FINGERS[9 - column] };
+                (ROWS[i / 10], left, finger)
+            } else {
+                (Row::Thumb, i < 33, 5)
+            };
+            let units = |v: i32| v as f32 / 100.0;
+            let pos = KeyPos {
+                x: units(x),
+                y: units(y),
+                w: units(w),
+                h: units(h),
+                rot: rot as f32 / 100.0,
+                rx: units(rx),
+                ry: units(ry),
+            };
+            crate::zmk::key_spec(&layers, i, finger, row, left, pos)
+        })
+        .collect();
+    let left: Vec<usize> = (0..keys.len()).filter(|k| keys[*k].left).collect();
+    let right: Vec<usize> = (0..keys.len()).filter(|k| !keys[*k].left).collect();
     Layout {
         id: LayoutId::Corne36,
         keys,
-        blocks,
+        blocks: vec![Block { keys: left }, Block { keys: right }],
         layer_names: vec!["Base", "Lower", "Raise"],
         unit: 52.0,
+        split: true,
         auto_shift: true,
     }
 }
@@ -753,7 +837,7 @@ mod tests {
         use Special::*;
         for id in LayoutId::ALL {
             let layout = id.build();
-            for s in [Escape, Tab, Left, Right, Up, Down, Home, End, Delete, Backspace, Enter, Space] {
+            for s in [Escape, Tab, Left, Right, Up, Down, Backspace, Enter, Space] {
                 assert!(layout.locate_special(s).is_some(), "{s:?} on {id:?}");
             }
             for m in [Ctrl, Alt, Super] {
@@ -766,45 +850,75 @@ mod tests {
         }
     }
 
+    /// The Typeractive default keymap.
     #[test]
     fn corne_layers() {
         let layout = corne36();
         assert_eq!(layout.keys.len(), 36);
         let one = layout.locate('1').unwrap();
-        assert_eq!((one.layer, one.shift), (1, false));
+        assert_eq!((one.layer, one.shift), (2, false));
+        // The shifted digits are on Lower, without shift.
+        let bang = layout.locate('!').unwrap();
+        assert_eq!((bang.layer, bang.shift), (1, false));
         let a = layout.locate('A').unwrap();
         assert_eq!((a.layer, a.shift), (0, true));
-        let brace = layout.locate('{').unwrap();
-        assert_eq!(brace.layer, 2);
-        // '1' is on the left half, Lower is on the left thumb too.
-        assert!(layout.layer_key_for(one.key, 1).is_some());
+        assert_eq!(layout.locate(',').unwrap().layer, 2);
+        assert_eq!(layout.locate('"').map(|l| (l.layer, l.shift)), Some((0, true)));
         let right = layout.locate_special(Special::Right).unwrap();
-        assert_eq!(right.layer, 2);
+        assert_eq!(right.layer, 1);
+        // Esc and Tab are thumb keys of the layers.
+        let esc = layout.locate_special(Special::Escape).unwrap();
+        assert_eq!((esc.layer, layout.keys[esc.key].row), (1, Row::Thumb));
+        // No shift, no Home: auto shift and the arrows do it.
+        assert!(layout.find_special(Special::Shift).next().is_none());
+        assert!(layout.locate_special(Special::Home).is_none());
+        // The GUI key is the outer left thumb, Ctrl and Alt are on the right bottom row.
+        let gui = layout.find_special(Special::Super).next().unwrap();
+        assert_eq!((layout.keys[gui].row, layout.keys[gui].left), (Row::Thumb, true));
+        assert_eq!(layout.keys[gui].legend(0, false, &layout.layer_names), "Win");
+        let ctrl = layout.find_special(Special::Ctrl).next().unwrap();
+        assert_eq!((layout.keys[ctrl].row, layout.keys[ctrl].finger), (Row::Bottom, 7));
+        // The inner thumbs are rotated and 1.5 keys tall.
+        let enter = layout.find_special(Special::Enter).next().unwrap();
+        assert_eq!((layout.keys[enter].pos.h, layout.keys[enter].pos.rot), (1.5, -24.0));
+        // The layer keys show what their layer types.
+        let h = layout.locate('h').unwrap().key;
+        assert_eq!(layout.keys[h].legend(1, false, &layout.layer_names), "←");
+        // &trans types the base layer.
+        let x = layout.locate('x').unwrap().key;
+        assert_eq!(layout.keys[x].legend(1, false, &layout.layer_names), "x");
+        let z = layout.locate('z').unwrap().key;
+        assert_eq!(layout.keys[z].legend(1, false, &layout.layer_names), "BT×");
     }
 
     #[test]
     fn plans_use_the_other_hand() {
         let layout = corne36();
-        // Ctrl+C: C is on the left, Ctrl is the K home row mod.
+        // Ctrl+C: Ctrl is on the right bottom row.
         let plan = layout.plan(Target::Chord(Chord::new(Mods::CTRL, KeyName::Char('c')))).unwrap();
-        let (_, ctrl) = plan.mods[0];
-        assert_eq!(layout.keys[ctrl].outputs[0].unwrap().lo, 'k');
         assert_eq!(
             layout.describe(&plan),
-            "Hold Ctrl on K (right middle finger), then press c (left middle finger, bottom row)"
+            "Hold Ctrl (right middle finger), then press c (left middle finger, bottom row)"
         );
         let plan = layout.plan(Target::Char('!')).unwrap();
         assert_eq!(
             layout.describe(&plan),
-            "Hold Lower (left thumb), then press ! where A is (left pinky, home row)"
+            "Hold Lower (left thumb), then press ! where Q is (left pinky, top row)"
+        );
+        let plan = layout.plan(Target::Char('?')).unwrap();
+        assert_eq!(
+            layout.describe(&plan),
+            "Hold Raise (right thumb), then hold ? a moment longer where L is, auto shift (right ring finger, home row)"
         );
         let plan = layout.plan(Target::Char('C')).unwrap();
         assert!(plan.auto_shift && plan.shift_key.is_none());
         assert_eq!(layout.describe(&plan), "Hold C a moment longer, auto shift (left middle finger, bottom row)");
-        // The chords still need the shift key.
-        let plan = layout.plan(Target::Chord(Chord::new(Mods::CTRL_SHIFT, KeyName::Special(Special::Right)))).unwrap();
-        assert!(!plan.auto_shift && plan.shift_key.is_some());
+        // The chords with shift can not be pressed without a shift key.
+        let select = Target::Chord(Chord::new(Mods::CTRL_SHIFT, KeyName::Special(Special::Right)));
+        assert!(!layout.can_press(select));
+        assert!(layout.can_press(Target::Chord(Chord::new(Mods::ALT, KeyName::Special(Special::Tab)))));
         let qwerty = qwerty(&KbdGrid::qwerty_us());
+        assert!(qwerty.can_press(select));
         let plan = qwerty.plan(Target::Char('A')).unwrap();
         assert!(!qwerty.keys[plan.shift_key.unwrap()].left);
     }

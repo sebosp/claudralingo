@@ -11,7 +11,7 @@ use bevy::window::WindowFocused;
 
 use crate::game::{ActiveLayout, Coach, KeyPressed, Modifiers, NewExercise, TouchResult, Touched};
 use crate::klavaro::rand_below;
-use crate::layout::{Chord, KeyName, Mods, Special, Target};
+use crate::layout::{Chord, KeyName, Layout, Mods, Special, Target};
 use crate::progress::{ExerciseMode, Progress, Session, now_unix_seconds};
 use crate::theme::tokens;
 use crate::ui::ShortcutsRoot;
@@ -188,6 +188,27 @@ pub struct Task {
     pub title: &'static str,
     pub chords: Vec<Chord>,
     pub kind: TaskKind,
+    /// The layout can not press it, Ctrl+Shift+→ without a shift key: the editing tasks are
+    /// done for the user, so the next ones still make sense.
+    pub skip: bool,
+}
+
+/// The chord, or one doing the same on a line of text when the layout has no such key: ↑ for
+/// Home, ↓ for End, Backspace for Delete.
+fn adapt(layout: &Layout, chord: Chord) -> Option<Chord> {
+    let can = |c: Chord| layout.can_press(Target::Chord(c)).then_some(c);
+    can(chord).or_else(|| {
+        let KeyName::Special(special) = chord.key else {
+            return None;
+        };
+        let instead = match special {
+            Special::Home => Special::Up,
+            Special::End => Special::Down,
+            Special::Delete => Special::Backspace,
+            _ => return None,
+        };
+        can(Chord::new(chord.mods, KeyName::Special(instead)))
+    })
 }
 
 fn shuffled<T>(mut items: Vec<T>) -> Vec<T> {
@@ -197,10 +218,23 @@ fn shuffled<T>(mut items: Vec<T>) -> Vec<T> {
 
 /// One round: the editing chords follow each other on the same line, a wrong chord changes
 /// nothing, the keys come in a random order.
-pub fn draw_tasks() -> Vec<Task> {
+pub fn draw_tasks(layout: &Layout) -> Vec<Task> {
     use Special::*;
     use TaskKind::*;
-    let task = |title, kind, chords| Task { title, chords, kind };
+    let task = |title, kind, chords: Vec<Chord>| {
+        let adapted: Vec<Option<Chord>> = chords.iter().map(|c| adapt(layout, *c)).collect();
+        match kind {
+            // The keys that do not exist are left out.
+            Keys => {
+                let chords: Vec<Chord> = adapted.into_iter().flatten().collect();
+                Task { title, skip: chords.is_empty(), chords, kind }
+            }
+            _ if adapted.iter().all(Option::is_some) => {
+                Task { title, chords: adapted.into_iter().flatten().collect(), kind, skip: false }
+            }
+            _ => Task { title, chords, kind, skip: true },
+        }
+    };
     let key = |special| Chord::special(special);
     let ctrl = |c| Chord::new(Mods::CTRL, KeyName::Char(c));
     let with = |mods, special| Chord::new(mods, KeyName::Special(special));
@@ -254,17 +288,11 @@ pub struct Drill {
     times: BTreeMap<String, f64>,
 }
 
-impl Default for Drill {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Drill {
-    pub fn new() -> Self {
-        let tasks = draw_tasks();
-        let n_steps = tasks.iter().map(|t| t.chords.len()).sum();
-        Drill {
+    pub fn new(layout: &Layout) -> Self {
+        let tasks = draw_tasks(layout);
+        let n_steps = tasks.iter().filter(|t| !t.skip).map(|t| t.chords.len()).sum();
+        let mut drill = Drill {
             tasks,
             task: 0,
             step: 0,
@@ -281,7 +309,29 @@ impl Drill {
             finished: None,
             summary: String::new(),
             times: BTreeMap::new(),
+        };
+        drill.skip_tasks(0.0);
+        drill
+    }
+
+    /// Does the skipped tasks, until a task to press.
+    fn skip_tasks(&mut self, now: f64) {
+        while let Some(task) = self.tasks.get(self.task).filter(|t| t.skip) {
+            if task.kind == TaskKind::Editor {
+                for chord in task.chords.clone() {
+                    self.editor.apply(&chord);
+                }
+            }
+            self.task += 1;
         }
+        if self.task >= self.tasks.len() && self.finished.is_none() {
+            self.finished = Some(self.elapsed(now));
+        }
+    }
+
+    /// The tasks the layout can not press, for the summary.
+    pub fn skipped(&self) -> Vec<&'static str> {
+        self.tasks.iter().filter(|t| t.skip).map(|t| t.title).collect()
     }
 
     pub fn current(&self) -> Option<&Task> {
@@ -316,9 +366,7 @@ impl Drill {
         if self.step >= self.tasks[self.task].chords.len() {
             self.step = 0;
             self.task += 1;
-            if self.task >= self.tasks.len() {
-                self.finished = Some(self.elapsed(now));
-            }
+            self.skip_tasks(now);
         }
     }
 
@@ -453,6 +501,10 @@ fn finish(drill: &mut Drill, progress: &mut Progress) {
     }
     if let Some((name, seconds)) = drill.times.iter().filter(|(n, _)| *n != "Alt+Tab").max_by(|a, b| a.1.total_cmp(b.1)) {
         summary.push_str(&format!(" · slowest: {name} ({seconds:.1} s)"));
+    }
+    let skipped = drill.skipped();
+    if !skipped.is_empty() {
+        summary.push_str(&format!("\nNot on this keymap, done for you: {}", skipped.join(", ")));
     }
     summary.push_str("\nEnter: another round");
     drill.summary = summary;
@@ -611,7 +663,7 @@ mod tests {
     #[test]
     fn editing_round() {
         let mut editor = Editor::new("the quick brown fox jumps over the lazy dog");
-        let tasks = draw_tasks();
+        let tasks = draw_tasks(&crate::layout::LayoutId::QwertyUs.build());
         let mut after = Vec::new();
         for task in tasks.iter().filter(|t| t.kind == TaskKind::Editor) {
             for chord in &task.chords {
@@ -635,11 +687,21 @@ mod tests {
     fn every_chord_has_a_plan() {
         for id in crate::layout::LayoutId::ALL {
             let layout = id.build();
-            for task in draw_tasks() {
+            for task in draw_tasks(&layout).into_iter().filter(|t| !t.skip) {
                 for chord in task.chords {
-                    assert!(layout.plan(Target::Chord(chord)).is_some(), "{} on {id:?}", chord.name());
+                    assert!(layout.can_press(Target::Chord(chord)), "{} on {id:?}", chord.name());
                 }
             }
+            // The editing round stays the same: every skipped task is done for the user.
+            let mut drill = Drill::new(&layout);
+            while let Some(chord) = drill.expected() {
+                if drill.current().map(|t| t.kind) == Some(TaskKind::Editor) {
+                    drill.editor.apply(&chord);
+                }
+                drill.advance(0.0);
+            }
+            assert!(drill.finished.is_some());
+            assert!(drill.editor.text.iter().collect::<String>().split(' ').count() > 2, "{id:?}");
             for c in SYMBOLS.chars() {
                 assert!(layout.plan(Target::Char(c)).is_some(), "{c} on {id:?}");
             }

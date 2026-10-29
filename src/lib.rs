@@ -14,6 +14,7 @@ pub mod prompt;
 pub mod shortcuts;
 pub mod theme;
 pub mod ui;
+pub mod zmk;
 
 pub struct ClaudralingoPlugin;
 

@@ -2,12 +2,19 @@
 //! modifier keys to hold in amber and backspace in red while there are errors to erase, like
 //! layer-tutor.
 //!
-//! The legends fade out while the typing goes well, the layout and the colors stay. A wrong key
-//! or a pause shows the next key again, with its legend. The layer trainer always shows the
-//! layer and the modifier keys to hold, with the instructions above the keyboard.
+//! The keys sit where the physical layout puts them, rotated thumbs included, and are drawn by
+//! [`KeyMaterial`] so the rotated ones keep smooth edges. The legends fade out while the typing
+//! goes well, the layout and the colors stay. A wrong key or a pause shows the next key again,
+//! with its legend. The layer trainer always shows the layer and the modifier keys to hold, with
+//! the instructions above the keyboard. A click on a layer key shows the legends of its layer.
+use bevy::asset::embedded_asset;
 use bevy::feathers::constants::fonts;
-use bevy::feathers::theme::{ThemeBackgroundColor, ThemeBorderColor, ThemeToken, UiTheme};
+use bevy::feathers::theme::{ThemeBackgroundColor, ThemeToken, UiTheme};
+use bevy::picking::events::PointerClick;
 use bevy::prelude::*;
+use bevy::reflect::TypePath;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 use bevy::text::FontSource;
 
 use crate::game::{ActiveLayout, Coach};
@@ -16,11 +23,40 @@ use crate::layout::{Layout, Plan, Special, Target};
 use crate::theme::tokens;
 use crate::ui::{KeyboardRoot, TrainerHint};
 
+/// The space between two keys, in logical pixels.
 const GAP: f32 = 5.0;
+/// The transparent margin of the key nodes, the anti-aliasing of the edges is drawn in it.
+const MARGIN: f32 = 2.0;
+const RADIUS: f32 = 8.0;
+const BORDER: f32 = 1.0;
+/// The padding of the cases around the keys.
+const PADDING: f32 = 12.0;
 /// Below this fade the next key is not highlighted any more.
 const HINT_FADE: f32 = 0.35;
 /// The fade of the legends follows the coach at this rate per second.
 const FADE_RATE: f32 = 3.0;
+
+/// A key cap, see `key.wgsl`.
+#[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
+pub struct KeyMaterial {
+    #[uniform(0)]
+    fill: Vec4,
+    #[uniform(1)]
+    border: Vec4,
+    /// The corner radius, the border width, the margin and the width of the node, in logical
+    /// pixels.
+    #[uniform(2)]
+    shape: Vec4,
+    /// The color of the finger.
+    #[uniform(3)]
+    stripe: Vec4,
+}
+
+impl UiMaterial for KeyMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://claudralingo/key.wgsl".into()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KeyRole {
@@ -51,11 +87,14 @@ pub struct KeyCap {
 }
 
 /// The node, the legend and the home row mod legend of a key.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct KeyEntities {
     pub node: Entity,
     pub legend: Entity,
     pub hold: Option<Entity>,
+    material: Handle<KeyMaterial>,
+    /// The fill, border and finger colors in the material, it is only touched when they change.
+    colors: Option<(Color, Color, Color)>,
 }
 
 #[derive(Resource, Default)]
@@ -66,6 +105,8 @@ pub struct KeyboardView {
     legends: Option<(u8, bool)>,
     /// The fade of the legends on the screen, it follows the coach smoothly.
     shown_fade: f32,
+    /// The layer shown after a click on its layer key.
+    pub preview: Option<u8>,
 }
 
 impl KeyboardView {
@@ -78,7 +119,9 @@ pub struct KeyboardPlugin;
 
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<KeyboardView>()
+        embedded_asset!(app, "key.wgsl");
+        app.add_plugins(UiMaterialPlugin::<KeyMaterial>::default())
+            .init_resource::<KeyboardView>()
             .add_systems(Update, (rebuild_keyboard, update_hints).chain().after(crate::game::GameSystems));
     }
 }
@@ -88,6 +131,7 @@ fn rebuild_keyboard(
     mut view: ResMut<KeyboardView>,
     roots: Query<Entity, With<KeyboardRoot>>,
     asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<KeyMaterial>>,
     mut commands: Commands,
 ) {
     let Ok(root) = roots.single() else {
@@ -99,66 +143,81 @@ fn rebuild_keyboard(
     commands.entity(root).despawn_children();
     let layout = &layout.0;
     let font = FontSource::Handle(asset_server.load(fonts::MONO));
-    let placeholder = KeyEntities { node: Entity::PLACEHOLDER, legend: Entity::PLACEHOLDER, hold: None };
-    let mut keys = vec![placeholder; layout.keys.len()];
+    let mut keys: Vec<Option<KeyEntities>> = vec![None; layout.keys.len()];
     for block in &layout.blocks {
+        let (x0, y0, x1, y1) = block.bounds(&layout.keys);
         let block_node = commands
             .spawn((
                 Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(GAP),
-                    padding: UiRect::all(px(12)),
+                    width: px((x1 - x0) * layout.unit - GAP + 2.0 * PADDING),
+                    height: px((y1 - y0) * layout.unit - GAP + 2.0 * PADDING),
                     border_radius: BorderRadius::all(px(16)),
                     ..default()
                 },
                 ThemeBackgroundColor(tokens::KEYBOARD_CASE),
-                UiTransform::from_rotation(Rot2::degrees(block.tilt)),
                 ChildOf(root),
             ))
             .id();
-        for (offset, row) in &block.rows {
-            let row_node = commands
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Start,
-                        column_gap: px(GAP),
-                        margin: UiRect::left(px(offset * layout.unit)),
-                        ..default()
-                    },
-                    ChildOf(block_node),
-                ))
-                .id();
-            for &index in row {
-                keys[index] = spawn_key(&mut commands, layout, index, row_node, font.clone());
-            }
+        for &index in &block.keys {
+            let origin = (x0, y0);
+            keys[index] = Some(spawn_key(&mut commands, &mut materials, layout, index, origin, block_node, font.clone()));
         }
     }
-    *view = KeyboardView { keys, built: true, legends: None, shown_fade: 1.0 };
+    *view = KeyboardView {
+        keys: keys.into_iter().flatten().collect(),
+        built: true,
+        legends: None,
+        shown_fade: 1.0,
+        preview: None,
+    };
 }
 
-fn spawn_key(commands: &mut Commands, layout: &Layout, index: usize, parent: Entity, font: FontSource) -> KeyEntities {
+#[allow(clippy::too_many_arguments)]
+fn spawn_key(
+    commands: &mut Commands,
+    materials: &mut Assets<KeyMaterial>,
+    layout: &Layout,
+    index: usize,
+    (x0, y0): (f32, f32),
+    parent: Entity,
+    font: FontSource,
+) -> KeyEntities {
     let key = &layout.keys[index];
     let unit = layout.unit;
+    let pos = key.pos;
+    // The node is the key cap and its margin, centered where the physical layout puts the key.
+    let (width, height) = (pos.w * unit - GAP + 2.0 * MARGIN, pos.h * unit - GAP + 2.0 * MARGIN);
+    let (cx, cy) = pos.center();
+    let center = ((cx - x0) * unit - GAP / 2.0 + PADDING, (cy - y0) * unit - GAP / 2.0 + PADDING);
+    let material = materials.add(KeyMaterial {
+        fill: Vec4::ZERO,
+        border: Vec4::ZERO,
+        shape: Vec4::new(RADIUS, BORDER, MARGIN, width),
+        stripe: Vec4::ZERO,
+    });
     let node = commands
         .spawn((
             Node {
-                width: px(key.width * unit - GAP),
-                height: px(unit - GAP),
-                margin: UiRect::top(px(key.y_offset * unit)),
+                position_type: PositionType::Absolute,
+                left: px(center.0 - width / 2.0),
+                top: px(center.1 - height / 2.0),
+                width: px(width),
+                height: px(height),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border: UiRect::all(px(1)),
-                border_radius: BorderRadius::all(px(8)),
                 ..default()
             },
-            ThemeBackgroundColor(tokens::KEY_BG),
-            ThemeBorderColor(tokens::KEY_BORDER),
-            UiTransform::default(),
+            MaterialNode(material.clone()),
+            UiTransform::from_rotation(Rot2::degrees(pos.rot)),
             KeyCap { index, role: KeyRole::Idle },
             ChildOf(parent),
         ))
         .id();
+    if let Some(Special::Layer(layer)) = key.special {
+        commands.entity(node).observe(move |_: On<PointerClick>, mut view: ResMut<KeyboardView>| {
+            view.preview = if view.preview == Some(layer) { None } else { Some(layer) };
+        });
+    }
     let legend = key.legend(0, false, &layout.layer_names);
     let font_size = if legend.chars().count() > 2 { 12.0 } else { 19.0 };
     // The text colors are set every frame, with the fade.
@@ -167,6 +226,7 @@ fn spawn_key(commands: &mut Commands, layout: &Layout, index: usize, parent: Ent
             Text::new(legend),
             TextFont { font: font.clone(), font_size: FontSize::Px(font_size), ..default() },
             TextColor(Color::NONE),
+            Pickable::IGNORE,
             ChildOf(node),
         ))
         .id();
@@ -176,25 +236,13 @@ fn spawn_key(commands: &mut Commands, layout: &Layout, index: usize, parent: Ent
                 Text::new(hold),
                 TextFont { font: font.clone(), font_size: FontSize::Px(9.0), ..default() },
                 TextColor(Color::NONE),
-                Node { position_type: PositionType::Absolute, top: px(2), right: px(4), ..default() },
+                Node { position_type: PositionType::Absolute, top: px(2.0 + MARGIN), right: px(4.0 + MARGIN), ..default() },
+                Pickable::IGNORE,
                 ChildOf(node),
             ))
             .id()
     });
-    // The finger stripe of Klavaro's colored keyboard.
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(4),
-            width: percent(36),
-            height: px(3),
-            border_radius: BorderRadius::all(px(2)),
-            ..default()
-        },
-        ThemeBackgroundColor(tokens::FINGERS[key.finger.min(9) as usize].clone()),
-        ChildOf(node),
-    ));
-    KeyEntities { node, legend, hold }
+    KeyEntities { node, legend, hold, material, colors: None }
 }
 
 /// The roles of the keys for the next target, with its plan.
@@ -226,6 +274,10 @@ pub fn hints(layout: &Layout, target: Option<Target>) -> (Vec<KeyRole>, Option<P
     (roles, Some(plan))
 }
 
+fn to_vec4(color: Color) -> Vec4 {
+    LinearRgba::from(color).to_vec4()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_hints(
     coach: Res<Coach>,
@@ -233,10 +285,10 @@ fn update_hints(
     theme: Res<UiTheme>,
     time: Res<Time>,
     mut view: ResMut<KeyboardView>,
+    mut materials: ResMut<Assets<KeyMaterial>>,
     mut caps: Query<&mut KeyCap>,
     mut texts: Query<(&mut Text, &mut TextColor), Without<TrainerHint>>,
     mut trainer: Query<&mut Text, With<TrainerHint>>,
-    mut commands: Commands,
 ) {
     let layout = &layout.0;
     if view.keys.len() != layout.keys.len() {
@@ -244,30 +296,50 @@ fn update_hints(
     }
     let step = FADE_RATE * time.delta_secs();
     view.shown_fade += (coach.fade - view.shown_fade).clamp(-step, step);
-    let fade = view.shown_fade;
+    let preview = view.preview;
+    // The legends of a previewed layer are all shown.
+    let fade = if preview.is_some() { 1.0 } else { view.shown_fade };
 
-    let (roles, plan) = hints(layout, coach.target);
+    let (mut roles, plan) = hints(layout, coach.target);
     let trainer_applies = (coach.layer_trainer && plan.as_ref().is_some_and(Plan::is_combo)) || coach.always_show;
     let show_plan = coach.reveal || trainer_applies || coach.fade > HINT_FADE;
     let in_plan = |key: usize| plan.as_ref().is_some_and(|p| p.keys().any(|k| k == key));
+    if let Some(layer) = preview {
+        for key in layout.find_special(Special::Layer(layer)) {
+            roles[key] = KeyRole::Hold;
+        }
+    }
+    let border = theme.color(&tokens::KEY_BORDER);
 
     for (index, role) in roles.iter().enumerate() {
         // Backspace is always shown while there are errors to erase.
-        let role = if show_plan || *role == KeyRole::Erase { *role } else { KeyRole::Idle };
-        let entities = view.keys[index];
+        let previewed = preview.is_some() && *role == KeyRole::Hold && !in_plan(index);
+        let role = if show_plan || *role == KeyRole::Erase || previewed { *role } else { KeyRole::Idle };
+        let entities = &mut view.keys[index];
         // The keys spawned this frame are not queryable yet, they start idle.
         if let Ok(mut cap) = caps.get_mut(entities.node)
             && cap.role != role
         {
             cap.role = role;
-            commands.entity(entities.node).insert(ThemeBackgroundColor(role.tokens().0));
         }
-        let alpha = if role != KeyRole::Idle && (in_plan(index) || role == KeyRole::Erase) && show_plan {
+        let (fill_token, text_token) = role.tokens();
+        // The finger stripe of Klavaro's colored keyboard.
+        let finger = theme.color(&tokens::FINGERS[layout.keys[index].finger.min(9) as usize]);
+        let colors = (theme.color(&fill_token), border, finger);
+        if entities.colors != Some(colors)
+            && let Some(mut material) = materials.get_mut(&entities.material)
+        {
+            material.fill = to_vec4(colors.0);
+            material.border = to_vec4(colors.1);
+            material.stripe = to_vec4(colors.2);
+            entities.colors = Some(colors);
+        }
+        let alpha = if role != KeyRole::Idle && (in_plan(index) || role == KeyRole::Erase || previewed) {
             1.0
         } else {
             fade
         };
-        let color = theme.color(&role.tokens().1).with_alpha(alpha);
+        let color = theme.color(&text_token).with_alpha(alpha);
         if let Ok((_, mut text_color)) = texts.get_mut(entities.legend)
             && text_color.0 != color
         {
@@ -285,9 +357,10 @@ fn update_hints(
         }
     }
 
-    // The legends of the layer, and shifted, of the next key.
-    let legends = match &plan {
-        Some(plan) if show_plan => (plan.layer, plan.shift),
+    // The legends of the previewed layer, or of the layer, and shifted, of the next key.
+    let legends = match (&plan, preview) {
+        (_, Some(layer)) => (layer, false),
+        (Some(plan), None) if show_plan => (plan.layer, plan.shift),
         _ => (0, false),
     };
     if view.legends != Some(legends) {
@@ -302,8 +375,12 @@ fn update_hints(
         view.legends = Some(legends);
     }
 
-    let instructions = match &plan {
-        Some(plan) if trainer_applies => layout.describe(plan),
+    let instructions = match (&plan, preview) {
+        (_, Some(layer)) => {
+            let name = Special::Layer(layer).name(&layout.layer_names);
+            format!("The {name} layer: what the keys type while {name} is held, click {name} again to hide it")
+        }
+        (Some(plan), None) if trainer_applies => layout.describe(plan),
         _ => String::new(),
     };
     for mut text in &mut trainer {

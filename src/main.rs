@@ -151,6 +151,7 @@ mod snapshot {
         mut commands: Commands,
         mut exit: MessageWriter<AppExit>,
         mut theme: ResMut<claudralingo::theme::ThemeMode>,
+        mut keyboard: ResMut<claudralingo::keyboard::KeyboardView>,
     ) {
         *frame += 1;
         let window = *window;
@@ -161,6 +162,12 @@ mod snapshot {
                 claudralingo::theme::ThemeMode::Dark => claudralingo::theme::ThemeMode::Light,
                 claudralingo::theme::ThemeMode::Light => claudralingo::theme::ThemeMode::Dark,
             };
+        }
+        // `CLAUDRALINGO_PREVIEW_LAYER=1` shows a layer as a click on its layer key does.
+        if *frame == 50
+            && let Some(layer) = std::env::var("CLAUDRALINGO_PREVIEW_LAYER").ok().and_then(|l| l.parse().ok())
+        {
+            keyboard.preview = Some(layer);
         }
         let typed = (*frame as usize).checked_sub(start).filter(|i| i % 3 == 0).map(|i| i / 3);
         match typed.and_then(|i| snapshot.typing.get(i)) {

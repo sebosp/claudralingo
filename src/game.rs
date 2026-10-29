@@ -144,7 +144,7 @@ impl Plugin for GamePlugin {
             .insert_resource(coach)
             .insert_resource(progress.theme)
             .insert_resource(bevy::feathers::theme::UiTheme(crate::theme::props(progress.theme)))
-            .insert_resource(crate::shortcuts::Drill::new())
+            .insert_resource(crate::shortcuts::Drill::new(&layout))
             .insert_resource(progress)
             .insert_resource(Grid(grid))
             .insert_resource(ActiveLayout(layout))
@@ -212,7 +212,7 @@ fn new_exercise(
     time: Res<Time<Real>>,
 ) {
     *exercise = generate(&grid.0, &layout.0, &mut progress);
-    *drill = crate::shortcuts::Drill::new();
+    *drill = crate::shortcuts::Drill::new(&layout.0);
     coach.reset(time.elapsed_secs_f64());
 }
 

@@ -50,8 +50,7 @@ The next key is green, the shift to hold purple, the layer and the modifier keys
 (with the legends of that layer), backspace red while there are errors to erase. The stripe at
 the bottom of each key is the finger that types it. The hands under the keyboard have the same
 colors: the finger of the next key lifts and glows, the fingers holding a shift, a layer or a
-modifier key are outlined in amber. The keys are not rotated, bevy_ui draws the edges of rotated
-nodes without anti-aliasing.
+modifier key are outlined in amber.
 
 - **Fade legends** (on by default): every exercise starts with the legends and the hints shown,
   they fade out over the first 20 correct keys, only the layout and the finger colors stay. A
@@ -99,18 +98,29 @@ A wrong chord changes nothing, it counts as a miss of the task and the chord is 
 
 ### The Corne keymap
 
-The Corne keymap is a placeholder until it matches the real one:
+The Corne 3x5+3 is the default 5 column keymap of the Typeractive wireless Corne
+(<https://docs.typeractive.xyz/build-guides/corne-wireless/firmware>, `config/corne.keymap` of
+[corne-wireless-5-col-zmk-config](https://github.com/typeractivexyz/corne-wireless-5-col-zmk-config)),
+read from its ZMK bindings by `src/zmk.rs`, with the key positions of ZMK's
+`foostan_corne_5col_layout`: the column stagger, the inner thumbs 1.5 keys tall and turned by 12°
+and 24°.
 
-- Base: QWERTY with auto shift (a key held a moment longer types its shifted character, shown
-  in purple on the key itself), home row mods Super, Alt, Ctrl on A S D and ; L K;
-- thumbs: `Shift Lower Space` on the left, `Enter Raise Backspace` on the right;
-- Lower: digits on the top row, shifted digits on the home row, `` ` ~ ' " \ `` and `| - _ = +`
-  on the bottom row;
-- Raise: `Esc Tab Home End Del` on the left top row, `[ ] { }` on the right top row, the arrows on
-  H J K L, `PgUp PgDn Ins` on N M ,.
+- Base: QWERTY with auto shift (a key held a moment longer types its shifted character, the key
+  turns purple), `' .` on the right pinky, Ctrl and Alt on the right bottom row;
+- thumbs: `GUI Lower Space` on the left, `Enter Raise Backspace` on the right;
+- Lower: `! @ # $ % ^ & * ( )`, the Bluetooth profiles, the arrows on H J K L, Esc and Tab on the
+  right thumbs;
+- Raise: the digits, `- = { [ ( ) ] } / \`, `` ` , : ; . ``, Esc on the left thumb, Tab on the
+  right one.
 
-See `corne36` in `src/layout.rs`. The QWERTY layout has the usual touch typing fingers, the
-modifiers, Esc and the navigation keys.
+Click Lower or Raise on the screen to see what every key types on that layer, click again to go
+back. The keymap has no Shift, Home, End nor Delete key: the shortcuts round uses ↑, ↓ and
+Backspace for Home, End and Delete, and does the Ctrl+Shift selections for you.
+
+The keys are drawn by a small UI material (`src/key.wgsl`) that anti-aliases their edges inside
+the node: bevy_ui draws the shapes up to the edges of their quads, rotated quads get jagged.
+Other keyboards (Lily58, Corne 6 columns, tenkeyless, full size) are a physical layout and a
+keymap away, see `corne36` in `src/layout.rs`.
 
 ## Progress
 
