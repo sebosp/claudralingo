@@ -13,6 +13,8 @@ use crate::ui::PromptRoot;
 pub const LINE_HEIGHT: f32 = 40.0;
 const CHAR_WIDTH: f32 = 17.0;
 const FONT_SIZE: f32 = 26.0;
+/// The large text setting, in the same width.
+const LARGE: f32 = 1.4;
 /// The paragraphs are wrapped at this many characters.
 const MAX_COLUMNS: usize = 56;
 /// The lines shown before and after the line of the cursor.
@@ -53,7 +55,7 @@ impl Plugin for PromptPlugin {
 }
 
 /// Wraps the paragraphs after a space, returns the char ranges of the visual lines.
-pub fn wrap(text: &[char]) -> Vec<(usize, usize)> {
+pub fn wrap(text: &[char], max_columns: usize) -> Vec<(usize, usize)> {
     let mut lines = Vec::new();
     let mut start = 0;
     let mut last_space = None;
@@ -67,7 +69,7 @@ pub fn wrap(text: &[char]) -> Vec<(usize, usize)> {
         if *c == ' ' {
             last_space = Some(i);
         }
-        if i + 1 - start > MAX_COLUMNS
+        if i + 1 - start > max_columns
             && let Some(space) = last_space
         {
             lines.push((start, space + 1));
@@ -95,22 +97,27 @@ fn rebuild_prompt(
     mut view: ResMut<PromptView>,
     roots: Query<Entity, With<PromptRoot>>,
     asset_server: Res<AssetServer>,
+    progress: Res<crate::progress::Progress>,
     mut commands: Commands,
-    mut built: Local<Option<u64>>,
+    mut built: Local<Option<(u64, bool)>>,
 ) {
     let Ok(root) = roots.single() else {
         return;
     };
-    // A new exercise has a new text.
-    if *built == Some(exercise.id) {
+    // A new exercise has a new text, the large text other sizes.
+    let large = progress.large_text;
+    if *built == Some((exercise.id, large)) {
         return;
     }
-    *built = Some(exercise.id);
+    *built = Some((exercise.id, large));
+    let scale = if large { LARGE } else { 1.0 };
+    let (line_height, char_width) = (LINE_HEIGHT * scale, CHAR_WIDTH * scale);
+    let max_columns = (MAX_COLUMNS as f32 / scale) as usize;
     commands.entity(root).despawn_children();
     let text = &exercise.tutor.text;
     let font = TextFont {
         font: FontSource::Handle(asset_server.load(fonts::MONO)),
-        font_size: FontSize::Px(FONT_SIZE),
+        font_size: FontSize::Px(FONT_SIZE * scale),
         ..default()
     };
     *view = PromptView {
@@ -119,7 +126,7 @@ fn rebuild_prompt(
         visible_line: Some(0),
         ..default()
     };
-    for (start, end) in wrap(text) {
+    for (start, end) in wrap(text, max_columns) {
         // The nodes of this frame can not be queried yet, the first lines are visible already.
         let visible = view.lines.len() <= LINES_AFTER;
         let line = commands
@@ -127,7 +134,7 @@ fn rebuild_prompt(
                 Node {
                     display: if visible { Display::Flex } else { Display::None },
                     flex_direction: FlexDirection::Row,
-                    height: px(LINE_HEIGHT),
+                    height: px(line_height),
                     ..default()
                 },
                 PromptLine,
@@ -143,8 +150,8 @@ fn rebuild_prompt(
             let node = commands
                 .spawn((
                     Node {
-                        width: px(CHAR_WIDTH),
-                        height: px(LINE_HEIGHT - 4.0),
+                        width: px(char_width),
+                        height: px(line_height - 4.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::bottom(px(3)),
@@ -222,7 +229,7 @@ mod tests {
     #[test]
     fn wrap_after_spaces() {
         let text: Vec<char> = format!("{}¶\nab cd¶\n", "word ".repeat(20)).chars().collect();
-        let lines = wrap(&text);
+        let lines = wrap(&text, MAX_COLUMNS);
         assert!(lines.iter().all(|(s, e)| e - s <= MAX_COLUMNS + 1));
         assert_eq!(lines.last().map(|(s, e)| text[*s..*e].iter().collect::<String>()), Some("ab cd¶".into()));
         // Every char but the new lines is on a line.

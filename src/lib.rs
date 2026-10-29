@@ -2,6 +2,7 @@
 use bevy::feathers::FeathersPlugins;
 use bevy::prelude::*;
 
+pub mod background;
 pub mod drills;
 pub mod effects;
 pub mod game;
@@ -30,6 +31,7 @@ impl Plugin for ClaudralingoPlugin {
             hands::HandsPlugin,
             effects::EffectsPlugin,
             shortcuts::ShortcutsPlugin,
+            background::BackgroundPlugin,
         ));
     }
 }

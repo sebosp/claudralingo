@@ -61,6 +61,24 @@ modifier key are outlined in amber.
   Super, always shows the keys to hold and the key to press, with the instructions above the
   keyboard, i.e. "Hold Lower (left thumb), then press ! where A is (left pinky, home row)".
 
+### Colors, background and settings
+
+The finger colors and the colors of the Lower and Raise layers are the validated categorical
+palette of the dataviz reference (blue, orange, aqua, yellow, magenta for the pinky to the thumb,
+green for Lower, violet for Raise), in the order of the physical neighbors: neighboring fingers and
+the thumb layers stay apart for the color blind (CVD ΔE ≥ 8.4) and for normal vision (ΔE ≥ 19).
+Red stays the erase hint. The colors are never alone: the legends and the texts name the fingers
+and the layers.
+
+The background is the edges of a slowly drifting low poly mesh, its triangles join and dissolve.
+Its vertices wear the colors of the most missed keys: the finger color, or the layer color when the
+key is on Lower or Raise; "Focus" under "Your keys" names them. Under the text to type and the
+hands the lines blur away.
+
+Settings (toolbar): the keyboard, dark mode, the background (off, subtle, lively), fade legends,
+layer trainer, the hands, reduce motion (no drift, sparks, shakes nor breathing keys) and a large
+text to type.
+
 ### Finger drills
 
 One drill per finger, ‹ and › pick the finger: the pinky goes up and down its column (q a z), the
@@ -131,7 +149,9 @@ keymap away, see `corne36` in `src/layout.rs`.
 ## Progress
 
 Native builds save the progress to `~/.config/claudralingo/progress.json` (`$XDG_CONFIG_HOME` if
-set), the browser to its `localStorage`. Per layout:
+set), the browser to its `localStorage` (key `claudralingo.progress`, compact JSON). The progress
+is saved at the end of every exercise and every 5 seconds after a change, a closed browser tab
+loses at most those seconds; the last 5000 sessions are kept per layout. Per layout:
 
 - `keys`: the hits, misses and touch times of every character,
 - `best_keys` and `most_missed`: the rankings shown in the window,

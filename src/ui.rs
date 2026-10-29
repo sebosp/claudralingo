@@ -17,12 +17,20 @@ use crate::game::{ActiveLayout, Exercise, NewExercise, go_to_suggestion};
 use crate::klavaro::N_BASIC_LESSONS;
 use crate::klavaro::tutor::Query as TutorQuery;
 use crate::layout::{LayoutId, finger_name};
-use crate::progress::{ExerciseMode, Progress};
+use crate::progress::{BackgroundLevel, ExerciseMode, Progress};
 use crate::shortcuts::Drill;
 use crate::theme::{ThemeMode, tokens};
 
 #[derive(Component, Default, Clone)]
 pub struct PromptRoot;
+
+/// The text to type, the shortcuts or the results, the background blurs under it.
+#[derive(Component, Default, Clone)]
+pub struct ExerciseArea;
+
+/// The animated background, see [`crate::background`].
+#[derive(Component, Default, Clone)]
+pub struct BackgroundRoot;
 
 #[derive(Component, Default, Clone)]
 pub struct ShortcutsRoot;
@@ -63,6 +71,9 @@ enum Setting {
     Dark,
     FadeLegends,
     LayerTrainer,
+    ShowHands,
+    ReduceMotion,
+    LargeText,
 }
 
 #[derive(Component, Default, Clone)]
@@ -74,9 +85,23 @@ struct SuggestButton;
 #[derive(Component, Default, Clone)]
 struct HelpOverlay;
 
-/// The help is on the screen.
-#[derive(Resource, Default)]
-pub struct HelpOpen(pub bool);
+#[derive(Component, Default, Clone)]
+struct SettingsOverlay;
+
+/// The panel over the window, it takes the keys.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Panel {
+    #[default]
+    None,
+    Help,
+    Settings,
+}
+
+impl Panel {
+    pub fn toggle(&mut self, panel: Panel) {
+        *self = if *self == panel { Panel::None } else { panel };
+    }
+}
 
 const HELP: &str = "\
 MODES, the first menu
@@ -87,9 +112,9 @@ MODES, the first menu
 
 TOOLBAR
   ‹ ›  the lesson, the finger or the hand    Restart  a new text
-  Fade legends  the letters fade while you type well, an error or a pause shows the next key
-  Layer trainer  always shows the layer and the modifier keys to hold
-  The keyboard menu picks the layout, Dark the theme
+  Settings  the keyboard, dark mode, the background, motion, hands, text size and:
+    Fade legends  the letters fade while you type well, an error or a pause shows the next key
+    Layer trainer  always shows the layer and the modifier keys to hold
 
 TYPING
   Backspace erases the errors, Ctrl+Backspace all of them
@@ -104,6 +129,9 @@ ON-SCREEN KEYBOARD
   Lower and Raise: click to show and use their layer, click again to go back, or hold them
   Ctrl, Alt, Win: click them, then the key: they are never sent to your system
 
+BACKGROUND
+  Its colors are the fingers and layers of your most missed keys, named under Your keys
+
 F1 or ? opens this help, Esc or a click closes it. The progress is saved in ~/.config/claudralingo";
 
 #[derive(Component, Default, Clone)]
@@ -113,7 +141,7 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HelpOpen>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
+        app.init_resource::<Panel>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
             Update,
             (
                 init_settings,
@@ -123,7 +151,8 @@ impl Plugin for UiPlugin {
                 update_live_stats,
                 update_message,
                 update_suggestion,
-                show_help.run_if(resource_changed::<HelpOpen>),
+                show_panels.run_if(resource_changed::<Panel>),
+                show_hands,
                 update_rankings.run_if(resource_changed::<Progress>),
             )
                 .after(crate::game::GameSystems),
@@ -137,10 +166,12 @@ fn spawn_ui(mut commands: Commands, progress: Res<Progress>) {
     let layout = LayoutId::ALL.iter().position(|l| *l == progress.layout);
     let modes = list_rows_from_strings(ExerciseMode::ALL.map(ExerciseMode::name), mode);
     let layouts = list_rows_from_strings(LayoutId::ALL.map(LayoutId::name), layout);
-    commands.spawn_scene(root(modes, layouts));
+    let background = BackgroundLevel::ALL.iter().position(|b| *b == progress.background);
+    let backgrounds = list_rows_from_strings(BackgroundLevel::ALL.map(BackgroundLevel::name), background);
+    commands.spawn_scene(root(modes, layouts, backgrounds));
 }
 
-fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
+fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>) -> impl Scene {
     bsn! {
         Node {
             width: percent(100),
@@ -153,7 +184,16 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
         TabGroup
         ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
         Children [
-            @toolbar(modes, layouts)
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                top: px(0),
+                width: percent(100),
+                height: percent(100),
+            }
+            BackgroundRoot
+            --
+            @toolbar(modes)
             --
             @stats_bar()
             --
@@ -167,6 +207,7 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
                 min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
                 margin: UiRect::top(px(6)),
             }
+            ExerciseArea
             Children [
                 Node {
                     display: Display::Flex,
@@ -229,11 +270,13 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
             @rankings()
             --
             @help_overlay()
+            --
+            @settings_overlay(layouts, backgrounds)
         ]
     }
 }
 
-fn toolbar(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
+fn toolbar(modes: Box<dyn SceneList>) -> impl Scene {
     bsn! {
         Node {
             width: percent(100),
@@ -279,36 +322,132 @@ fn toolbar(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene
             --
             @flex_spacer()
             --
-            @FeathersCheckbox {
-                @caption: bsn! { @caption("Fade legends") }
+            @FeathersButton {
+                @caption: bsn! { @caption("Settings") }
             }
-            SettingControl(Setting::FadeLegends)
-            on(on_setting_change)
-            --
-            @FeathersCheckbox {
-                @caption: bsn! { @caption("Layer trainer") }
-            }
-            SettingControl(Setting::LayerTrainer)
-            on(on_setting_change)
-            --
-            @FeathersSelect {
-                @options: layouts,
-            }
-            Node {
-                min_width: px(140),
-            }
-            on(on_layout_change)
+            on(toggle_settings)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("?") }
             }
             on(toggle_help)
+        ]
+    }
+}
+
+/// A checkbox of the settings, with what it does.
+fn setting_checkbox(setting: Setting, text: &'static str) -> impl Scene {
+    bsn! {
+        @FeathersCheckbox {
+            @caption: bsn! { @caption(text) }
+        }
+        SettingControl({setting})
+        on(on_setting_change)
+    }
+}
+
+fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>) -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            display: Display::None,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        GlobalZIndex(50)
+        SettingsOverlay
+        Children [
+            // A click beside the panel closes it, the clicks in the panel do not reach it.
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                top: px(0),
+                width: percent(100),
+                height: percent(100),
+            }
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6))
+            on(close_panel)
             --
-            @label_dim("Dark")
-            --
-            @FeathersToggleSwitch
-            SettingControl(Setting::Dark)
-            on(on_setting_change)
+            @group()
+            Node {
+                width: px(520),
+            }
+            Children [
+                @group_header() Children [ @label("Settings") ]
+                --
+                @group_body()
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(12),
+                    padding: px(12),
+                }
+                Children [
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(12),
+                    }
+                    Children [
+                        @label("Keyboard") Node { min_width: px(110) }
+                        --
+                        @FeathersSelect {
+                            @options: layouts,
+                        }
+                        Node {
+                            min_width: px(180),
+                        }
+                        on(on_layout_change)
+                    ]
+                    --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(12),
+                    }
+                    Children [
+                        @label("Dark mode") Node { min_width: px(110) }
+                        --
+                        @FeathersToggleSwitch
+                        SettingControl(Setting::Dark)
+                        on(on_setting_change)
+                    ]
+                    --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(12),
+                    }
+                    Children [
+                        @label("Background") Node { min_width: px(110) }
+                        --
+                        @FeathersSelect {
+                            @options: backgrounds,
+                        }
+                        Node {
+                            min_width: px(180),
+                        }
+                        on(on_background_change)
+                    ]
+                    --
+                    @setting_checkbox(Setting::FadeLegends, "Fade legends: the letters fade while you type well")
+                    --
+                    @setting_checkbox(Setting::LayerTrainer, "Layer trainer: show the layer and modifier keys to hold")
+                    --
+                    @setting_checkbox(Setting::ShowHands, "Show the hands under the keyboard")
+                    --
+                    @setting_checkbox(Setting::ReduceMotion, "Reduce motion: no drift, sparks, shakes nor breathing keys")
+                    --
+                    @setting_checkbox(Setting::LargeText, "Large text to type")
+                    --
+                    @FeathersButton {
+                        @caption: bsn! { @caption("Close") }
+                        @variant: ButtonVariant::Primary,
+                    }
+                    on(close_settings)
+                ]
+            ]
         ]
     }
 }
@@ -398,6 +537,9 @@ impl Setting {
             Setting::Dark => progress.theme == ThemeMode::Dark,
             Setting::FadeLegends => progress.fade_legends,
             Setting::LayerTrainer => progress.layer_trainer,
+            Setting::ShowHands => progress.show_hands,
+            Setting::ReduceMotion => progress.reduce_motion,
+            Setting::LargeText => progress.large_text,
         }
     }
 }
@@ -440,6 +582,9 @@ fn on_setting_change(
         }
         Setting::FadeLegends => progress.fade_legends = change.value,
         Setting::LayerTrainer => progress.layer_trainer = change.value,
+        Setting::ShowHands => progress.show_hands = change.value,
+        Setting::ReduceMotion => progress.reduce_motion = change.value,
+        Setting::LargeText => progress.large_text = change.value,
     }
     progress.save();
     release_focus(&mut focus);
@@ -569,26 +714,77 @@ fn train_suggested_finger(
 }
 
 /// The help on the first start.
-fn first_help(mut progress: ResMut<Progress>, mut help: ResMut<HelpOpen>) {
+fn first_help(mut progress: ResMut<Progress>, mut panel: ResMut<Panel>) {
     if !progress.help_seen {
-        help.0 = true;
+        *panel = Panel::Help;
         progress.help_seen = true;
         progress.save();
     }
 }
 
-fn toggle_help(_: On<Activate>, mut help: ResMut<HelpOpen>, mut focus: ResMut<InputFocus>) {
-    help.0 = !help.0;
+fn toggle_help(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    panel.toggle(Panel::Help);
     release_focus(&mut focus);
 }
 
-fn close_help(_: On<PointerClick>, mut help: ResMut<HelpOpen>) {
-    help.0 = false;
+fn toggle_settings(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    panel.toggle(Panel::Settings);
+    release_focus(&mut focus);
 }
 
-fn show_help(help: Res<HelpOpen>, mut overlays: Query<&mut Node, With<HelpOverlay>>) {
-    for mut node in &mut overlays {
-        node.display = if help.0 { Display::Flex } else { Display::None };
+fn close_settings(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    *panel = Panel::None;
+    release_focus(&mut focus);
+}
+
+fn close_help(_: On<PointerClick>, mut panel: ResMut<Panel>) {
+    if *panel == Panel::Help {
+        *panel = Panel::None;
+    }
+}
+
+fn close_panel(_: On<PointerClick>, mut panel: ResMut<Panel>) {
+    *panel = Panel::None;
+}
+
+fn on_background_change(
+    change: On<ValueChange<Entity>>,
+    options: Query<&OptionIndex>,
+    mut progress: ResMut<Progress>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if let Ok(option) = options.get(change.value)
+        && let Some(level) = BackgroundLevel::ALL.get(option.0)
+    {
+        progress.background = *level;
+        progress.save();
+    }
+    release_focus(&mut focus);
+}
+
+fn show_panels(
+    panel: Res<Panel>,
+    mut helps: Query<&mut Node, (With<HelpOverlay>, Without<SettingsOverlay>)>,
+    mut settings: Query<&mut Node, With<SettingsOverlay>>,
+) {
+    let show = |visible: bool| if visible { Display::Flex } else { Display::None };
+    for mut node in &mut helps {
+        node.display = show(*panel == Panel::Help);
+    }
+    for mut node in &mut settings {
+        node.display = show(*panel == Panel::Settings);
+    }
+}
+
+fn show_hands(progress: Res<Progress>, mut hands: Query<&mut Node, With<HandsRoot>>) {
+    if !progress.is_changed() {
+        return;
+    }
+    let display = if progress.show_hands { Display::Flex } else { Display::None };
+    for mut node in &mut hands {
+        if node.display != display {
+            node.display = display;
+        }
     }
 }
 
@@ -807,11 +1003,15 @@ fn update_rankings(
     fingers.sort_by(|a, b| a.1.total_cmp(&b.1));
     let fingers: Vec<String> =
         fingers.iter().take(3).map(|(f, accuracy)| format!("{} {accuracy:.0}%", finger_name(*f))).collect();
+    // The colors of the background, named.
+    let focus: Vec<String> =
+        crate::background::focus(&layout.0, current).into_iter().map(|f| f.name(&layout.0)).collect();
     let mut text = format!(
-        "Best keys: {}\nMost missed: {}\nWeakest fingers: {}\n{} · {} exercises done",
+        "Best keys: {}\nMost missed: {}\nWeakest fingers: {}\nFocus, the colors of the background: {}\n{} · {} exercises done",
         list(&current.best_keys),
         if misses.is_empty() { "none".to_string() } else { misses.join("   ") },
         if fingers.is_empty() { "not enough touches yet".to_string() } else { fingers.join("   ") },
+        if focus.is_empty() { "no misses yet".to_string() } else { focus.join(", ") },
         layout_id.name(),
         current.sessions.len(),
     );

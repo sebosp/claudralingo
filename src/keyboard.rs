@@ -391,6 +391,14 @@ pub fn on_screen_keys(
     }
 }
 
+/// The finger of a key, the layer keys wear the color of their layer.
+pub fn stripe_token(key: &crate::layout::KeySpec) -> ThemeToken {
+    match key.special {
+        Some(Special::Layer(l)) if (l as usize) < tokens::LAYERS.len() => tokens::LAYERS[l as usize].clone(),
+        _ => tokens::FINGERS[key.finger.min(9) as usize].clone(),
+    }
+}
+
 fn to_vec4(color: Color) -> Vec4 {
     LinearRgba::from(color).to_vec4()
 }
@@ -493,7 +501,7 @@ fn update_hints(
         }
         let (fill_token, text_token) = role.tokens();
         // The finger stripe of Klavaro's colored keyboard.
-        let finger = theme.color(&tokens::FINGERS[layout.keys[index].finger.min(9) as usize]);
+        let finger = theme.color(&stripe_token(&layout.keys[index]));
         let colors = (theme.color(&fill_token), border, finger);
         if entities.colors != Some(colors)
             && let Some(mut material) = materials.get_mut(&entities.material)

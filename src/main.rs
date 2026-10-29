@@ -152,7 +152,7 @@ mod snapshot {
         mut exit: MessageWriter<AppExit>,
         mut theme: ResMut<claudralingo::theme::ThemeMode>,
         mut keyboard: ResMut<claudralingo::keyboard::KeyboardView>,
-        mut help: ResMut<claudralingo::ui::HelpOpen>,
+        mut panel: ResMut<claudralingo::ui::Panel>,
         layout: Res<claudralingo::game::ActiveLayout>,
     ) {
         *frame += 1;
@@ -165,9 +165,14 @@ mod snapshot {
                 claudralingo::theme::ThemeMode::Light => claudralingo::theme::ThemeMode::Dark,
             };
         }
-        // The help of the first start, kept with `CLAUDRALINGO_HELP`.
-        if *frame == 45 && std::env::var_os("CLAUDRALINGO_HELP").is_none() {
-            help.0 = false;
+        // The help of the first start, kept with `CLAUDRALINGO_HELP`, `CLAUDRALINGO_SETTINGS`
+        // opens the settings.
+        if *frame == 45 {
+            if std::env::var_os("CLAUDRALINGO_SETTINGS").is_some() {
+                *panel = claudralingo::ui::Panel::Settings;
+            } else if std::env::var_os("CLAUDRALINGO_HELP").is_none() {
+                *panel = claudralingo::ui::Panel::None;
+            }
         }
         // `CLAUDRALINGO_PREVIEW_LAYER=1` shows a layer as a click on its layer key does.
         if *frame == 50

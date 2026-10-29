@@ -11,6 +11,8 @@ use crate::klavaro::accuracy::Accuracy;
 use crate::layout::LayoutId;
 use crate::theme::ThemeMode;
 
+/// The sessions kept per layout, the browser storage is a few megabytes.
+const MAX_SESSIONS: usize = 5000;
 /// The keys with less touches are not ranked.
 const MIN_TOUCHES_TO_RANK: u64 = 20;
 const N_RANKED_KEYS: usize = 10;
@@ -59,6 +61,36 @@ impl ExerciseMode {
     /// The exercises with a text typed through the Klavaro tutor.
     pub fn is_typing(self) -> bool {
         self != ExerciseMode::Shortcuts
+    }
+}
+
+/// How much the background shows, see [`crate::background`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BackgroundLevel {
+    Off,
+    #[default]
+    Subtle,
+    Lively,
+}
+
+impl BackgroundLevel {
+    pub const ALL: [BackgroundLevel; 3] = [BackgroundLevel::Off, BackgroundLevel::Subtle, BackgroundLevel::Lively];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BackgroundLevel::Off => "Off",
+            BackgroundLevel::Subtle => "Subtle",
+            BackgroundLevel::Lively => "Lively",
+        }
+    }
+
+    /// The opacity of the lines, relative to the lively one.
+    pub fn strength(self) -> f32 {
+        match self {
+            BackgroundLevel::Off => 0.0,
+            BackgroundLevel::Subtle => 0.55,
+            BackgroundLevel::Lively => 1.0,
+        }
     }
 }
 
@@ -183,6 +215,12 @@ pub struct Progress {
     pub layer_trainer: bool,
     /// The help was shown once, on the first start.
     pub help_seen: bool,
+    pub background: BackgroundLevel,
+    /// No drifting background, no sparks, shakes nor breathing keys.
+    pub reduce_motion: bool,
+    pub show_hands: bool,
+    /// A bigger text to type, for the tired or weaker eyes.
+    pub large_text: bool,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -195,6 +233,10 @@ impl Default for Progress {
             fade_legends: true,
             layer_trainer: true,
             help_seen: false,
+            background: BackgroundLevel::default(),
+            reduce_motion: false,
+            show_hands: true,
+            large_text: false,
             layouts: BTreeMap::new(),
         }
     }
@@ -226,8 +268,15 @@ impl Progress {
             layout.update_rankings();
             layout.klavaro.sort();
             layout.klavaro.prune();
+            let excess = layout.sessions.len().saturating_sub(MAX_SESSIONS);
+            layout.sessions.drain(..excess);
         }
-        match serde_json::to_string_pretty(self) {
+        // Compact in the browser storage, readable in the file.
+        #[cfg(target_arch = "wasm32")]
+        let json = serde_json::to_string(self);
+        #[cfg(not(target_arch = "wasm32"))]
+        let json = serde_json::to_string_pretty(self);
+        match json {
             Ok(json) => storage::write(&json),
             Err(err) => error!("Unable to serialize the progress: {err}"),
         }

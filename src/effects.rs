@@ -102,15 +102,18 @@ fn spawn_sparks(commands: &mut Commands, at: Vec2, color: Color, error: bool) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_touch(
     mut touches: MessageReader<Touched>,
     keyboard: Res<KeyboardView>,
     prompt: Res<PromptView>,
     exercise: Res<Exercise>,
     theme: Res<UiTheme>,
+    progress: Res<crate::progress::Progress>,
     nodes: Query<(&UiGlobalTransform, &ComputedNode)>,
     mut commands: Commands,
 ) {
+    let calm = progress.reduce_motion;
     for touch in touches.read() {
         if let Some(key) = touch.pressed.and_then(|k| keyboard.node(k)) {
             commands.entity(key).insert(Pressed { age: 0.0 });
@@ -120,6 +123,10 @@ fn on_touch(
             TouchResult::Wrong => (tokens::SPARK_ERROR, true),
             TouchResult::Other => continue,
         };
+        // Reduced motion: the keys still sink when pressed, no sparks nor shakes.
+        if calm {
+            continue;
+        }
         if let Some(key) = touch.expected.and_then(|k| keyboard.node(k))
             && let Ok((transform, node)) = nodes.get(key)
         {
@@ -139,9 +146,15 @@ fn on_touch(
     }
 }
 
-fn fade_in_message(exercise: Res<Exercise>, messages: Query<Entity, With<MessageText>>, mut commands: Commands, mut was_end: Local<bool>) {
+fn fade_in_message(
+    exercise: Res<Exercise>,
+    progress: Res<crate::progress::Progress>,
+    messages: Query<Entity, With<MessageText>>,
+    mut commands: Commands,
+    mut was_end: Local<bool>,
+) {
     let is_end = exercise.tutor.query == TutorQuery::End;
-    if is_end && !*was_end {
+    if is_end && !*was_end && !progress.reduce_motion {
         for entity in &messages {
             commands.entity(entity).insert((FadeIn { age: 0.0 }, UiTransform::default()));
         }
@@ -152,6 +165,7 @@ fn fade_in_message(exercise: Res<Exercise>, messages: Query<Entity, With<Message
 /// The pressed keys sink and come back, the next key breathes.
 fn animate_keys(
     time: Res<Time>,
+    progress: Res<crate::progress::Progress>,
     mut keys: Query<(Entity, &KeyCap, &mut UiTransform, Option<&mut Pressed>)>,
     mut commands: Commands,
 ) {
@@ -159,7 +173,7 @@ fn animate_keys(
     let t = time.elapsed_secs();
     for (entity, cap, mut transform, pressed) in &mut keys {
         let mut scale = 1.0;
-        if cap.role == KeyRole::Target {
+        if cap.role == KeyRole::Target && !progress.reduce_motion {
             scale += 0.045 * (0.5 + 0.5 * (t * 5.0).sin());
         }
         if let Some(mut pressed) = pressed {
@@ -211,6 +225,7 @@ fn pulse_cursor(
     exercise: Res<Exercise>,
     prompt: Res<PromptView>,
     theme: Res<UiTheme>,
+    progress: Res<crate::progress::Progress>,
     mut borders: Query<&mut BorderColor>,
 ) {
     if exercise.tutor.query == TutorQuery::End {
@@ -219,7 +234,8 @@ fn pulse_cursor(
     if let Some(entity) = prompt.char_entity(exercise.tutor.cursor)
         && let Ok(mut border) = borders.get_mut(entity)
     {
-        let alpha = 0.3 + 0.7 * (0.5 + 0.5 * (time.elapsed_secs() * TAU / 1.2).cos());
+        let pulse = 0.5 + 0.5 * (time.elapsed_secs() * TAU / 1.2).cos();
+        let alpha = if progress.reduce_motion { 1.0 } else { 0.3 + 0.7 * pulse };
         border.set_all(theme.color(&tokens::CURSOR).with_alpha(alpha));
     }
 }

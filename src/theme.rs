@@ -55,6 +55,12 @@ pub mod tokens {
         ThemeToken::new_static("claudralingo.finger.8"),
         ThemeToken::new_static("claudralingo.finger.9"),
     ];
+    /// One color per layer of the split keyboards, 0 (the base layer) wears the finger colors.
+    pub const LAYERS: [ThemeToken; 3] = [
+        ThemeToken::new_static("claudralingo.layer.0"),
+        ThemeToken::new_static("claudralingo.layer.1"),
+        ThemeToken::new_static("claudralingo.layer.2"),
+    ];
 }
 
 /// Assigns a game token to a semantic token of the same name with a color.
@@ -69,9 +75,28 @@ fn hex(s: &str) -> Color {
 }
 
 /// From the pinky to the index, the index finger colors are shared by both hands.
-const FINGER_COLORS: [&str; 10] = [
-    "#888888", "#e05d8c", "#e0a13d", "#5fbf6a", "#3d9be0", "#9b8cff", "#3d9be0", "#5fbf6a", "#e0a13d", "#e05d8c",
-];
+// The finger and the layer colors are the categorical palette of the dataviz reference (blue,
+// orange, aqua, yellow, magenta, green, violet), in the order of the physical neighbors: pinky,
+// ring, middle, index, thumb, then Lower and Raise, the thumb keys. That order clears the
+// color-blind separation of neighboring colors (protan ΔE 8.4 dark, 9.1 light) and the normal
+// vision floor (ΔE 19.3 / 19.6), thumb, Lower and Raise clear it all-pairs. Red is left out, it
+// is the erase hint.
+const DARK_FINGERS: [&str; 5] = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"];
+const DARK_LAYERS: [&str; 3] = ["#8a93b3", "#008300", "#9085e9"];
+const LIGHT_FINGERS: [&str; 5] = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"];
+const LIGHT_LAYERS: [&str; 3] = ["#7a8196", "#008300", "#6250d6"];
+
+/// The colors of the fingers from the pinky to the thumb, mirrored for the right hand.
+fn set_fingers(props: &mut ThemeProps, fingers: [&str; 5], layers: [&str; 3]) {
+    set(props, &tokens::FINGERS[0], hex(layers[0]));
+    for (i, color) in fingers.iter().enumerate() {
+        set(props, &tokens::FINGERS[i + 1], hex(color));
+        set(props, &tokens::FINGERS[9 - i], hex(color));
+    }
+    for (token, color) in tokens::LAYERS.iter().zip(layers) {
+        set(props, token, hex(color));
+    }
+}
 
 pub fn props(mode: ThemeMode) -> ThemeProps {
     match mode {
@@ -104,9 +129,7 @@ pub fn dark_theme() -> ThemeProps {
     set(&mut props, &tokens::SPARK_ERROR, hex("#ff1f4c"));
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#1b2542"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#00e5ff"));
-    for (token, color) in tokens::FINGERS.iter().zip(FINGER_COLORS) {
-        set(&mut props, token, hex(color));
-    }
+    set_fingers(&mut props, DARK_FINGERS, DARK_LAYERS);
     props
 }
 
@@ -187,6 +210,7 @@ pub fn light_theme() -> ThemeProps {
     set(&mut props, &tokens::SPARK_ERROR, hex("#d8173f"));
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#d5d9e3"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#0088b8"));
+    set_fingers(&mut props, LIGHT_FINGERS, LIGHT_LAYERS);
     props
 }
 

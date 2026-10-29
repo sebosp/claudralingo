@@ -129,6 +129,7 @@ type FingerView<'a> =
 #[allow(clippy::too_many_arguments)]
 fn update_hands(
     coach: Res<Coach>,
+    progress: Res<crate::progress::Progress>,
     keyboard: Res<crate::keyboard::KeyboardView>,
     layout: Res<ActiveLayout>,
     theme: Res<UiTheme>,
@@ -157,7 +158,8 @@ fn update_hands(
         .flat_map(|p| p.shift_key.into_iter().chain(p.layer_key).chain(p.mods.iter().map(|(_, k)| *k)))
         .map(|k| Finger::of_key(layout, k))
         .collect();
-    let step = LIFT_RATE * time.delta_secs();
+    let calm = progress.reduce_motion;
+    let step = if calm { f32::INFINITY } else { LIFT_RATE * time.delta_secs() };
     for (entity, finger, mut background, mut border, mut transform, glows) in &mut fingers {
         let token = &tokens::FINGERS[finger.finger.min(9) as usize];
         let color = theme.color(token);

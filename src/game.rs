@@ -17,6 +17,8 @@ const FADE_TOUCHES: f32 = 20.0;
 const STUCK_SECONDS: f64 = 2.0;
 /// A key missed this many times in an exercise suggests the drill of its finger.
 const SUGGEST_MISSES: u32 = 3;
+/// The progress changed since this long is saved, the browser has no exit to save on.
+const AUTOSAVE_SECONDS: f64 = 5.0;
 /// A finger below this accuracy suggests its drill.
 const SUGGEST_ACCURACY: f64 = 92.0;
 
@@ -165,7 +167,7 @@ impl Plugin for GamePlugin {
                     .chain()
                     .in_set(GameSystems),
             )
-            .add_systems(Last, save_on_exit.run_if(on_message::<AppExit>));
+            .add_systems(Last, (autosave, save_on_exit.run_if(on_message::<AppExit>)));
     }
 }
 
@@ -286,17 +288,23 @@ fn read_keys(
     mut events: MessageReader<KeyboardInput>,
     mut focus_lost: MessageReader<KeyboardFocusLost>,
     mut modifiers: ResMut<Modifiers>,
-    mut help: ResMut<crate::ui::HelpOpen>,
+    mut panel: ResMut<crate::ui::Panel>,
     mut pressed: MessageWriter<KeyPressed>,
 ) {
     for event in events.read() {
         let down = event.state == ButtonState::Pressed;
-        // F1 opens and closes the help, Esc closes it, the help takes the other keys.
-        if down && (event.logical_key == Key::F1 || (help.0 && event.logical_key == Key::Escape)) {
-            help.0 = !help.0;
+        // F1 opens and closes the help, Esc closes the help and the settings, they take the
+        // other keys.
+        let open = *panel != crate::ui::Panel::None;
+        if down && event.logical_key == Key::F1 {
+            panel.toggle(crate::ui::Panel::Help);
             continue;
         }
-        if help.0 {
+        if down && open && event.logical_key == Key::Escape {
+            *panel = crate::ui::Panel::None;
+            continue;
+        }
+        if open {
             continue;
         }
         // AltGr types the symbols of the international layouts, it is not a shortcut modifier.
@@ -525,6 +533,20 @@ fn update_coach(
         if !coach.fade_legends {
             coach.fade = 1.0;
         }
+    }
+}
+
+/// Saves the touches of an exercise not finished yet, a closed browser tab keeps them.
+fn autosave(mut progress: ResMut<Progress>, time: Res<Time<Real>>, mut dirty: Local<bool>, mut last: Local<f64>) {
+    let now = time.elapsed_secs_f64();
+    if progress.is_changed() {
+        *dirty = true;
+    }
+    if *dirty && now - *last >= AUTOSAVE_SECONDS {
+        // The save sorts the rankings, it is not a change to save again.
+        progress.bypass_change_detection().save();
+        *dirty = false;
+        *last = now;
     }
 }
 
