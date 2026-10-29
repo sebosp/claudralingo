@@ -26,6 +26,7 @@ The four Klavaro exercises, with their original texts and goals, and two of Clau
 | Velocity         | random words of Klavaro's dictionary                       | 95% accuracy, 50 WPM               |
 | Fluidness        | paragraphs of a text                                       | 97% accuracy, 50 WPM, 70% fluidity |
 | Finger drill     | the keys of one finger, up and down its column             | 95% accuracy                       |
+| Finger bounce    | middle and index of one hand in turns, alternating case    | 95% accuracy, slower is expected   |
 | Shortcuts & keys | Esc, editing shortcuts, arrows, numbers, symbols, Alt+Tab  | every key on the first try         |
 
 Differences to Klavaro:
@@ -69,6 +70,16 @@ between Space and Enter. At the end of the other exercises, a key missed 3 times
 finger below 92% accuracy over all the exercises, suggests the drill of that finger: Tab or the
 button starts it. The weakest fingers are listed under the keyboard.
 
+### Finger bounce
+
+"Left hand finger bounce" and "Right hand finger bounce" train the independence of the middle and
+the index fingers, ‹ › switch the hand. The middle finger presses its top row key, the index runs
+down its home column (top, home, bottom row), the middle finger goes down one row, the index runs
+again, then the same for the inner column of the index: `eRfV DrFv cRfV EtGb dTgB CtGb` on the
+left hand. The next lines bounce in a random order. The case alternates on every letter: on the
+Corne every other key is held a moment longer for its auto shift, the speed drops, that is part
+of the exercise.
+
 ### Shortcuts & keys
 
 A round of 21 tasks, each one a key or a chord to press, with the keys to hold shown on the
@@ -90,7 +101,8 @@ A wrong chord changes nothing, it counts as a miss of the task and the chord is 
 
 The Corne keymap is a placeholder until it matches the real one:
 
-- Base: QWERTY, home row mods Super, Alt, Ctrl on A S D and ; L K;
+- Base: QWERTY with auto shift (a key held a moment longer types its shifted character, shown
+  in purple on the key itself), home row mods Super, Alt, Ctrl on A S D and ; L K;
 - thumbs: `Shift Lower Space` on the left, `Enter Raise Backspace` on the right;
 - Lower: digits on the top row, shifted digits on the home row, `` ` ~ ' " \ `` and `| - _ = +`
   on the bottom row;
@@ -117,10 +129,13 @@ saved too.
 
 ## Build
 
-The `Cargo.toml` has no `bevy/dynamic_linking`: the release binaries are built on a desktop and
-copied to other machines.
+Every native build links with mold (`.cargo/config.toml`, clang and mold are needed). `cargo dev`
+is `cargo run --features dynamic`: bevy as a shared library, for the local runs only. The release
+binaries are built without it and copied to other machines, they do not depend on
+`libbevy_dylib.so`.
 
 ```sh
+cargo dev                                # native, bevy linked dynamically, fast rebuilds
 cargo run --release                      # native
 cargo test                               # the Klavaro port and the layouts
 trunk serve --release                    # browser, http://127.0.0.1:8080

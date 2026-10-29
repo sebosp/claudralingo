@@ -212,7 +212,8 @@ pub fn hints(layout: &Layout, target: Option<Target>) -> (Vec<KeyRole>, Option<P
     let Some(plan) = layout.plan(target) else {
         return (roles, None);
     };
-    roles[plan.key] = KeyRole::Target;
+    // Purple: the key itself is held for the shift.
+    roles[plan.key] = if plan.auto_shift { KeyRole::Shift } else { KeyRole::Target };
     if let Some(shift) = plan.shift_key {
         roles[shift] = KeyRole::Shift;
     }

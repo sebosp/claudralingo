@@ -436,9 +436,17 @@ fn on_layout_change(
     release_focus(&mut focus);
 }
 
-/// ‹ and › change the finger in the finger drills, the basic lesson otherwise.
+/// ‹ and › change the finger in the finger drills, the hand in the bounces, the basic lesson
+/// otherwise.
 fn change_lesson(progress: &mut Progress, delta: isize) {
-    if progress.mode == ExerciseMode::Fingers {
+    if matches!(progress.mode, ExerciseMode::BounceLeft | ExerciseMode::BounceRight) {
+        // The other hand.
+        progress.mode = if progress.mode == ExerciseMode::BounceLeft {
+            ExerciseMode::BounceRight
+        } else {
+            ExerciseMode::BounceLeft
+        };
+    } else if progress.mode == ExerciseMode::Fingers {
         let current = progress.current();
         let i = FINGERS.iter().position(|f| *f == current.finger).unwrap_or(0);
         current.finger = FINGERS[(i as isize + delta).rem_euclid(FINGERS.len() as isize) as usize];
@@ -541,6 +549,11 @@ fn update_lesson_label(exercise: Res<Exercise>, layout: Res<ActiveLayout>, mut l
         ExerciseMode::Fingers => {
             let chars: Vec<String> = layout.0.finger_chars(exercise.finger).iter().map(|(c, _)| c.to_string()).collect();
             format!("{}: {}", capitalize(finger_name(exercise.finger)), chars.join(" "))
+        }
+        ExerciseMode::BounceLeft | ExerciseMode::BounceRight => {
+            let (middle, columns) = crate::drills::bounce_keys(&layout.0, exercise.mode == ExerciseMode::BounceLeft);
+            let columns: Vec<String> = columns.iter().map(|c| c.iter().collect()).collect();
+            format!("{} + {} · aLtErNaTe", middle.iter().collect::<String>(), columns.join(" "))
         }
         ExerciseMode::Shortcuts => "Esc, arrows, Ctrl, Alt".into(),
     };

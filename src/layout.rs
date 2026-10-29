@@ -319,6 +319,9 @@ pub struct Layout {
     pub layer_names: Vec<&'static str>,
     /// The size of a key unit in logical pixels.
     pub unit: f32,
+    /// The firmware shifts a character when its key is held a moment longer, the shift key is
+    /// only for the chords.
+    pub auto_shift: bool,
 }
 
 /// Where to find a character: the key, the layer to hold and whether shift is needed.
@@ -337,6 +340,8 @@ pub struct Plan {
     /// Shift is needed, with the key to hold when the layout has one.
     pub shift: bool,
     pub shift_key: Option<usize>,
+    /// The shifted character comes from holding the key a moment longer, no shift key.
+    pub auto_shift: bool,
     pub layer_key: Option<usize>,
     /// The Ctrl, Alt and Super keys to hold.
     pub mods: Vec<(Special, usize)>,
@@ -352,7 +357,7 @@ impl Plan {
 
     /// Needs more than a key of the base layer, for the layer trainer.
     pub fn is_combo(&self) -> bool {
-        self.layer > 0 || !self.mods.is_empty()
+        self.layer > 0 || !self.mods.is_empty() || self.auto_shift
     }
 }
 
@@ -436,11 +441,13 @@ impl Layout {
         };
         let key = location.key;
         let shift = location.shift || mods.shift;
+        let auto_shift = location.shift && !mods.shift && self.auto_shift;
         Some(Plan {
             key,
             layer: location.layer,
             shift,
-            shift_key: if shift { self.shift_for(key) } else { None },
+            shift_key: if shift && !auto_shift { self.shift_for(key) } else { None },
+            auto_shift,
             layer_key: if location.layer > 0 { self.layer_key_for(key, location.layer) } else { None },
             mods: mods.held().filter_map(|m| Some((m, self.modifier_for(key, m)?))).collect(),
         })
@@ -468,7 +475,9 @@ impl Layout {
         let key = &self.keys[plan.key];
         let legend = key.legend(plan.layer, plan.shift, names);
         let place = format!("{}, {}", finger(plan.key), key.row.name());
-        let press = if plan.layer > 0 {
+        let press = if plan.auto_shift {
+            format!("hold {legend} a moment longer, auto shift ({place})")
+        } else if plan.layer > 0 {
             format!("press {legend} where {} is ({place})", key.base_name(names))
         } else {
             format!("press {legend} ({place})")
@@ -478,6 +487,13 @@ impl Layout {
         } else {
             format!("Hold {}, then {press}", holds.join(" + "))
         }
+    }
+
+    /// The shifted character of the key of a character of the base layer, `C` for `c`.
+    pub fn shifted(&self, c: char) -> char {
+        self.locate(c)
+            .and_then(|l| self.keys[l.key].outputs.first().copied().flatten())
+            .map_or(c, |out| out.up)
     }
 
     /// The characters of the base layer typed by a finger, with their row, for the finger drills.
@@ -620,10 +636,11 @@ pub fn qwerty(grid: &KbdGrid) -> Layout {
         blocks: vec![main, Block { rows: nav_rows, tilt: 0.0 }],
         layer_names: vec!["Base"],
         unit: 44.0,
+        auto_shift: false,
     }
 }
 
-/// Corne 3x5+3: QWERTY on the base layer with Super, Alt and Ctrl on the home rows (A S D and
+/// Corne 3x5+3, with auto shift: QWERTY on the base layer with Super, Alt and Ctrl on the home rows (A S D and
 /// ; L K), numbers and shifted numbers on Lower, brackets, Escape, Tab and the navigation keys on
 /// Raise. Thumbs: Shift, Lower and Space on the left, Enter, Raise and Backspace on the right.
 pub fn corne36() -> Layout {
@@ -703,6 +720,7 @@ pub fn corne36() -> Layout {
         blocks,
         layer_names: vec!["Base", "Lower", "Raise"],
         unit: 52.0,
+        auto_shift: true,
     }
 }
 
@@ -780,6 +798,12 @@ mod tests {
             layout.describe(&plan),
             "Hold Lower (left thumb), then press ! where A is (left pinky, home row)"
         );
+        let plan = layout.plan(Target::Char('C')).unwrap();
+        assert!(plan.auto_shift && plan.shift_key.is_none());
+        assert_eq!(layout.describe(&plan), "Hold C a moment longer, auto shift (left middle finger, bottom row)");
+        // The chords still need the shift key.
+        let plan = layout.plan(Target::Chord(Chord::new(Mods::CTRL_SHIFT, KeyName::Special(Special::Right)))).unwrap();
+        assert!(!plan.auto_shift && plan.shift_key.is_some());
         let qwerty = qwerty(&KbdGrid::qwerty_us());
         let plan = qwerty.plan(Target::Char('A')).unwrap();
         assert!(!qwerty.keys[plan.shift_key.unwrap()].left);

@@ -183,6 +183,8 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         ExerciseMode::Velocity => klavaro::velocity::draw_random_words(),
         ExerciseMode::Fluidness => klavaro::fluidness::draw_random_paragraphs(),
         ExerciseMode::Fingers => crate::drills::draw_finger_drill(layout, finger),
+        ExerciseMode::BounceLeft => crate::drills::draw_bounce(layout, true),
+        ExerciseMode::BounceRight => crate::drills::draw_bounce(layout, false),
         // The shortcuts have their own tasks, see `crate::shortcuts`.
         ExerciseMode::Shortcuts => String::new(),
     };
@@ -455,6 +457,7 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             comment
         }
         ExerciseMode::Fingers => crate::drills::comment(results.accuracy, exercise.finger),
+        ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::bounce_comment(results.accuracy),
         ExerciseMode::Shortcuts => String::new(),
     };
     exercise.suggestion = suggest(exercise, progress, layout);

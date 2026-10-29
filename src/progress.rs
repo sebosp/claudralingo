@@ -24,17 +24,22 @@ pub enum ExerciseMode {
     Fluidness,
     /// The keys of one finger, up and down its column.
     Fingers,
+    /// The middle and the index finger of the left hand in turns, in alternating case.
+    BounceLeft,
+    BounceRight,
     /// Escape, the arrows, the numbers, the symbols and the Ctrl and Alt shortcuts.
     Shortcuts,
 }
 
 impl ExerciseMode {
-    pub const ALL: [ExerciseMode; 6] = [
+    pub const ALL: [ExerciseMode; 8] = [
         ExerciseMode::Basic,
         ExerciseMode::Adaptability,
         ExerciseMode::Velocity,
         ExerciseMode::Fluidness,
         ExerciseMode::Fingers,
+        ExerciseMode::BounceLeft,
+        ExerciseMode::BounceRight,
         ExerciseMode::Shortcuts,
     ];
 
@@ -45,6 +50,8 @@ impl ExerciseMode {
             ExerciseMode::Velocity => "Velocity",
             ExerciseMode::Fluidness => "Fluidness",
             ExerciseMode::Fingers => "Finger drill",
+            ExerciseMode::BounceLeft => "Left hand finger bounce",
+            ExerciseMode::BounceRight => "Right hand finger bounce",
             ExerciseMode::Shortcuts => "Shortcuts & keys",
         }
     }

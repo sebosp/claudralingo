@@ -1,0 +1,10 @@
+# mold links every native build, the release binaries stay self-contained: they link bevy
+# statically unless the `dynamic` feature is on.
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[alias]
+# Local runs on wormgat: bevy as a shared library, the incremental builds link in a moment.
+# Never for the binaries copied to other machines, they would not find libbevy_dylib.so.
+dev = "run --features dynamic"

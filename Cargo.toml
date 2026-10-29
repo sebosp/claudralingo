@@ -8,7 +8,8 @@ license = "GPL-3.0-or-later"
 description = "A touch typing tutor in Bevy, Chinese hanzi calligraphy later"
 
 [dependencies]
-# No "bevy/dynamic_linking": the binaries are built on wormgat or corvid-zt and copied to portia-zt.
+# No "bevy/dynamic_linking" here: the release binaries are copied to portia-zt, the `dynamic`
+# feature (`cargo dev`) is for the local runs only.
 bevy = { version = "0.20.0", default-features = false, features = [
     "ui",
     "bevy_feathers",
@@ -30,6 +31,8 @@ js-sys = "0.3"
 default = []
 # Bevy development helpers, not used in the release builds.
 dev = ["bevy/bevy_dev_tools", "bevy/track_location"]
+# Bevy as a shared library for fast local builds, `cargo dev`. Not for the copied binaries.
+dynamic = ["bevy/dynamic_linking"]
 
 # Small optimization for our code, full optimization for the dependencies.
 [profile.dev]

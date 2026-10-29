@@ -63,6 +63,82 @@ fn draw_thumbs_drill() -> String {
     text
 }
 
+/// The keys of the middle finger from the top row down, and the columns of the index, the home
+/// column first.
+pub fn bounce_keys(layout: &Layout, left: bool) -> (Vec<char>, Vec<Vec<char>>) {
+    const ROWS: [Row; 3] = [Row::Top, Row::Home, Row::Bottom];
+    let (middle, index) = if left { (3, 4) } else { (7, 6) };
+    let in_row = |finger: u8, row: Row| -> Vec<char> {
+        layout.finger_chars(finger).into_iter().filter(|(_, r)| *r == row).map(|(c, _)| c).collect()
+    };
+    let middle_keys: Vec<char> = ROWS.iter().filter_map(|r| in_row(middle, *r).first().copied()).collect();
+    let rows: Vec<Vec<char>> = ROWS.iter().map(|r| in_row(index, *r)).collect();
+    let n_columns = rows.iter().map(Vec::len).min().unwrap_or(0);
+    // The home column is the outer one of the index, on the left of the right hand.
+    let columns = (0..n_columns)
+        .map(|k| {
+            let k = if left { k } else { n_columns - 1 - k };
+            rows.iter().map(|row| row[k]).collect()
+        })
+        .collect();
+    (middle_keys, columns)
+}
+
+/// The finger bounce of a hand: the middle finger presses a key, the index runs down its column
+/// (top, home, bottom row), the middle finger goes to its next row, the index runs again, for
+/// both index columns. Then the same moves in a random order. The case alternates on every
+/// letter: on a keyboard with auto shift every other key is held a moment longer.
+pub fn draw_bounce(layout: &Layout, left: bool) -> String {
+    const WORDS_PER_BOUNCE_LINE: usize = 6;
+    let (middle_keys, columns) = bounce_keys(layout, left);
+    let index_keys: Vec<char> = columns.concat();
+    if middle_keys.is_empty() || index_keys.len() < 3 {
+        return draw_thumbs_drill();
+    }
+    let mut words: Vec<Vec<char>> = Vec::new();
+    for column in &columns {
+        for m in &middle_keys {
+            words.push(std::iter::once(*m).chain(column.iter().copied()).collect());
+        }
+    }
+    let n_ordered = words.len();
+    while words.len() < n_ordered + N_LINES * WORDS_PER_BOUNCE_LINE {
+        let mut keys = index_keys.clone();
+        fastrand::shuffle(&mut keys);
+        let m = middle_keys[rand_below(middle_keys.len())];
+        words.push(std::iter::once(m).chain(keys.into_iter().take(3)).collect());
+    }
+    let mut text = String::new();
+    for (i, word) in words.iter().enumerate() {
+        for (j, c) in word.iter().enumerate() {
+            // Every other letter shifted, every other word starts shifted.
+            let upper = (i + j) % 2 == 1;
+            text.push(if upper { layout.shifted(*c) } else { *c });
+        }
+        // The ordered bounces on the first lines, then the random ones.
+        let line_end = if i < n_ordered {
+            i + 1 == n_ordered
+        } else {
+            (i + 1 - n_ordered).is_multiple_of(WORDS_PER_BOUNCE_LINE)
+        };
+        if line_end || i + 1 == words.len() {
+            text.push(UPSYM);
+            text.push('\n');
+        } else {
+            text.push(' ');
+        }
+    }
+    text
+}
+
+pub fn bounce_comment(accuracy: f64) -> String {
+    if accuracy < GOAL_ACCURACY {
+        "Slow down: the middle finger stays on its column, the index visits every row.\nPress Enter to bounce again.".into()
+    } else {
+        "Clean bounces! The speed is lower with the alternating case, that is expected.\nPress Enter to bounce again, ‹ › for the other hand.".into()
+    }
+}
+
 pub fn comment(accuracy: f64, finger: u8) -> String {
     let finger = crate::layout::finger_name(finger);
     if accuracy < GOAL_ACCURACY {
@@ -88,6 +164,27 @@ mod tests {
                     if finger != 5 {
                         assert_eq!(layout.finger_of(c), Some(finger), "{c:?} in the {finger} drill on {id:?}");
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounces() {
+        for id in LayoutId::ALL {
+            let layout = id.build();
+            for (left, fingers) in [(true, [3, 4]), (false, [7, 6])] {
+                let text = draw_bounce(&layout, left);
+                let first = text.split([' ', UPSYM]).next().unwrap();
+                assert_eq!(first, if left { "eRfV" } else { "iUjM" }, "{id:?}");
+                for c in text.chars().filter(|c| !matches!(*c, ' ' | '\n' | UPSYM)) {
+                    let finger = layout.finger_of(c).unwrap();
+                    assert!(fingers.contains(&finger), "{c:?} on {id:?}");
+                }
+                // The case alternates inside the words.
+                for word in text.split([' ', '\n', UPSYM]).filter(|w| !w.is_empty()) {
+                    let ups: Vec<bool> = word.chars().map(|c| layout.shifted(c) == c && c.is_alphabetic()).collect();
+                    assert!(ups.windows(2).all(|w| w[0] != w[1] || !word.chars().all(char::is_alphabetic)), "{word}");
                 }
             }
         }
