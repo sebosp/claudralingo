@@ -31,10 +31,12 @@ pub enum ExerciseMode {
     BounceRight,
     /// Escape, the arrows, the numbers, the symbols and the Ctrl and Alt shortcuts.
     Shortcuts,
+    /// The words of HSK 1 to 4, written with a pen and typed in pinyin, see [`crate::hanzi`].
+    Hanzi,
 }
 
 impl ExerciseMode {
-    pub const ALL: [ExerciseMode; 8] = [
+    pub const ALL: [ExerciseMode; 9] = [
         ExerciseMode::Basic,
         ExerciseMode::Adaptability,
         ExerciseMode::Velocity,
@@ -43,6 +45,7 @@ impl ExerciseMode {
         ExerciseMode::BounceLeft,
         ExerciseMode::BounceRight,
         ExerciseMode::Shortcuts,
+        ExerciseMode::Hanzi,
     ];
 
     pub fn name(self) -> &'static str {
@@ -55,12 +58,13 @@ impl ExerciseMode {
             ExerciseMode::BounceLeft => "Left hand finger bounce",
             ExerciseMode::BounceRight => "Right hand finger bounce",
             ExerciseMode::Shortcuts => "Shortcuts & keys",
+            ExerciseMode::Hanzi => "Hanzi (HSK 1-4)",
         }
     }
 
     /// The exercises with a text typed through the Klavaro tutor.
     pub fn is_typing(self) -> bool {
-        self != ExerciseMode::Shortcuts
+        !matches!(self, ExerciseMode::Shortcuts | ExerciseMode::Hanzi)
     }
 }
 
@@ -225,7 +229,35 @@ pub struct Progress {
     pub fit_window: bool,
     /// The zoom over the fit to the window, or over 100% without it.
     pub zoom_factor: f32,
+    /// The pinyin of the hanzi words is typed on the nine keys of a phone.
+    pub pinyin_keypad: bool,
+    /// The words of the hanzi mode are spoken.
+    pub sound: bool,
+    pub hanzi: HanziProgress,
     pub layouts: BTreeMap<String, LayoutProgress>,
+}
+
+/// The progress of the hanzi mode, whatever the keyboard.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HanziProgress {
+    /// The level of Claudralingo, 0 based, see [`crate::hanzi::data::Level`].
+    pub level: usize,
+    /// The word of the level being learned.
+    pub word: usize,
+    pub words: BTreeMap<String, HanziWordStats>,
+    /// The levels done, with their misses.
+    pub levels_done: BTreeMap<usize, u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HanziWordStats {
+    pub practiced: u32,
+    /// The strokes written right and the misses.
+    pub strokes: u32,
+    pub misses: u32,
+    pub pinyin_misses: u32,
 }
 
 impl Default for Progress {
@@ -243,6 +275,9 @@ impl Default for Progress {
             large_text: false,
             fit_window: true,
             zoom_factor: 1.0,
+            pinyin_keypad: false,
+            sound: true,
+            hanzi: HanziProgress::default(),
             layouts: BTreeMap::new(),
         }
     }

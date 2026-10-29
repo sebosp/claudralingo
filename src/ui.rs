@@ -81,6 +81,8 @@ enum Setting {
     ReduceMotion,
     LargeText,
     FitWindow,
+    PinyinKeypad,
+    Sound,
 }
 
 #[derive(Component, Default, Clone)]
@@ -91,6 +93,10 @@ struct SuggestButton;
 
 #[derive(Component, Default, Clone)]
 struct ZoomLabel;
+
+/// The views of the keyboard modes, hidden in the hanzi mode.
+#[derive(Component, Default, Clone)]
+pub struct TypingOnly;
 
 /// The column of the window that scrolls when zoomed in.
 #[derive(Component, Default, Clone)]
@@ -104,6 +110,9 @@ struct SettingsOverlay;
 
 #[derive(Component, Default, Clone)]
 struct LessonsOverlay;
+
+#[derive(Component, Default, Clone)]
+struct LessonsHint;
 
 /// The tiles of the lessons, filled when the panel opens.
 #[derive(Component, Default, Clone)]
@@ -178,6 +187,7 @@ impl Plugin for UiPlugin {
                 show_panels.run_if(resource_changed::<Panel>),
                 fill_lessons.run_if(resource_changed::<Panel>),
                 show_hands,
+                show_hanzi,
                 update_rankings.run_if(resource_changed::<Progress>),
                 update_zoom_label.run_if(resource_changed::<UiScale>),
             )
@@ -248,6 +258,7 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                     margin: UiRect::top(px(6)),
                 }
                 ExerciseArea
+                TypingOnly
                 Children [
                     Node {
                         display: Display::Flex,
@@ -287,7 +298,10 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                     on(train_suggested_finger)
                 ]
                 --
+                @crate::hanzi::view()
+                --
                 @label("") TrainerHint
+                TypingOnly
                 Node {
                     min_height: px(20),
                 }
@@ -301,6 +315,7 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                     padding: px(8),
                 }
                 KeyboardRoot
+                TypingOnly
                 --
                 Node {
                     display: Display::Flex,
@@ -313,6 +328,7 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                 @flex_spacer()
                 --
                 @rankings()
+            TypingOnly
             ]
             --
             @help_overlay()
@@ -494,6 +510,10 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     --
                     @setting_checkbox(Setting::LargeText, "Large text to type")
                     --
+                    @setting_checkbox(Setting::PinyinKeypad, "Hanzi: type the pinyin on the nine keys of a phone (T9)")
+                    --
+                    @setting_checkbox(Setting::Sound, "Hanzi: speak the words")
+                    --
                     Node {
                         flex_direction: FlexDirection::Row,
                         align_items: AlignItems::Center,
@@ -564,7 +584,7 @@ fn lessons_overlay() -> impl Scene {
                 width: px(820),
             }
             Children [
-                @group_header() Children [ @label("Lessons of the basic course") ]
+                @group_header() Children [ @label("Lessons") ]
                 --
                 @group_body()
                 Node {
@@ -572,7 +592,7 @@ fn lessons_overlay() -> impl Scene {
                     row_gap: px(10),
                 }
                 Children [
-                    @label_dim("The best and the last accuracy, the times typed: green when the best reached 95%, red below. Click a lesson to practice it again.")
+                    @label_dim("") LessonsHint
                     --
                     Node {
                         display: Display::Flex,
@@ -580,7 +600,10 @@ fn lessons_overlay() -> impl Scene {
                         flex_wrap: FlexWrap::Wrap,
                         column_gap: px(6),
                         row_gap: px(6),
+                        max_height: vh(62),
+                        overflow: Overflow::scroll_y(),
                     }
+                    bevy::ui_widgets::ScrollArea
                     LessonsGrid
                     --
                     @FeathersButton {
@@ -618,9 +641,24 @@ fn fill_lessons(
     theme: Res<bevy::feathers::theme::UiTheme>,
     asset_server: Res<AssetServer>,
     grids: Query<Entity, With<LessonsGrid>>,
+    hanzi: Res<crate::hanzi::data::HanziData>,
+    hanzi_font: Res<crate::hanzi::HanziFont>,
+    mut hints: Query<&mut Text, With<LessonsHint>>,
     mut commands: Commands,
 ) {
     if *panel != Panel::Lessons {
+        return;
+    }
+    let hint = if progress.mode == ExerciseMode::Hanzi {
+        "The levels of the hanzi mode, ten words each, green when done. Click a level to practice it."
+    } else {
+        "The best and the last accuracy, the times typed: green when the best reached 95%, red below. Click a lesson to practice it again."
+    };
+    for mut text in &mut hints {
+        text.0 = hint.into();
+    }
+    if progress.mode == ExerciseMode::Hanzi {
+        fill_hanzi_levels(&progress, &hanzi, &hanzi_font, &theme, &asset_server, &grids, &mut commands);
         return;
     }
     let font = |size: f32| TextFont {
@@ -692,6 +730,80 @@ fn fill_lessons(
     }
 }
 
+/// The levels of the hanzi mode: their words, done or not, a click practices one.
+fn fill_hanzi_levels(
+    progress: &Progress,
+    data: &crate::hanzi::data::HanziData,
+    font: &crate::hanzi::HanziFont,
+    theme: &bevy::feathers::theme::UiTheme,
+    asset_server: &AssetServer,
+    grids: &Query<Entity, With<LessonsGrid>>,
+    commands: &mut Commands,
+) {
+    let latin = |size: f32| TextFont {
+        font: bevy::text::FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::REGULAR)),
+        font_size: FontSize::Px(size),
+        ..default()
+    };
+    let cjk = TextFont {
+        font: bevy::text::FontSource::Handle(font.0.clone()),
+        font_size: FontSize::Px(15.0),
+        ..default()
+    };
+    for root in grids {
+        commands.entity(root).despawn_children();
+        for (i, level) in data.levels.iter().enumerate() {
+            let words: String = data.words[level.words.clone()].iter().take(4).map(|w| w.word.as_str()).collect::<Vec<_>>().join(" ");
+            let (status, detail) = match progress.hanzi.levels_done.get(&i) {
+                Some(misses) => (Some(tokens::CHAR_CORRECT), format!("done · {misses} misses")),
+                None if i == progress.hanzi.level => (None, format!("word {}/{}", progress.hanzi.word + 1, level.words.len())),
+                None => (None, "not yet".into()),
+            };
+            let border = if i == progress.hanzi.level { theme.color(&tokens::CURSOR) } else { Color::NONE };
+            let tile = commands
+                .spawn((
+                    Node {
+                        width: px(92),
+                        height: px(68),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::axes(px(6), px(4)),
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(6)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(theme.color(&tokens::KEY_BG)),
+                    BorderColor::all(border),
+                    ChildOf(root),
+                ))
+                .observe(move |_: On<PointerClick>, mut progress: ResMut<Progress>, mut panel: ResMut<Panel>| {
+                    progress.mode = ExerciseMode::Hanzi;
+                    progress.hanzi.level = i;
+                    progress.hanzi.word = 0;
+                    progress.save();
+                    *panel = Panel::None;
+                })
+                .id();
+            commands.spawn((
+                Text::new(format!("HSK{} · {}/{}", level.hsk, level.part, level.parts)),
+                latin(13.0),
+                TextLayout::no_wrap(),
+                ThemeTextColor(feathers_tokens::TEXT_MAIN),
+                Pickable::IGNORE,
+                ChildOf(tile),
+            ));
+            commands.spawn((Text::new(words), cjk.clone(), TextLayout::no_wrap(), ThemeTextColor(feathers_tokens::TEXT_MAIN), Pickable::IGNORE, ChildOf(tile)));
+            commands.spawn((
+                Text::new(detail),
+                latin(11.0),
+                ThemeTextColor(status.unwrap_or(feathers_tokens::TEXT_DIM)),
+                Pickable::IGNORE,
+                ChildOf(tile),
+            ));
+        }
+    }
+}
+
 fn help_overlay() -> impl Scene {
     bsn! {
         Node {
@@ -735,6 +847,7 @@ fn stats_bar() -> impl Scene {
             margin: UiRect::top(px(6)),
         }
         ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+        TypingOnly
         Children [
             @label("") LiveStats
             --
@@ -787,6 +900,8 @@ impl Setting {
             Setting::ReduceMotion => progress.reduce_motion,
             Setting::LargeText => progress.large_text,
             Setting::FitWindow => progress.fit_window,
+            Setting::PinyinKeypad => progress.pinyin_keypad,
+            Setting::Sound => progress.sound,
         }
     }
 }
@@ -833,6 +948,8 @@ fn on_setting_change(
         Setting::ReduceMotion => progress.reduce_motion = change.value,
         Setting::LargeText => progress.large_text = change.value,
         Setting::FitWindow => progress.fit_window = change.value,
+        Setting::PinyinKeypad => progress.pinyin_keypad = change.value,
+        Setting::Sound => progress.sound = change.value,
     }
     progress.save();
     release_focus(&mut focus);
@@ -911,6 +1028,9 @@ fn change_lesson(progress: &mut Progress, delta: isize) {
         } else {
             ExerciseMode::BounceLeft
         };
+    } else if progress.mode == ExerciseMode::Hanzi {
+        progress.hanzi.level = progress.hanzi.level.saturating_add_signed(delta);
+        progress.hanzi.word = 0;
     } else if progress.mode == ExerciseMode::Fingers {
         let current = progress.current();
         let i = FINGERS.iter().position(|f| *f == current.finger).unwrap_or(0);
@@ -1079,11 +1199,37 @@ fn show_panels(
     }
 }
 
+/// The keyboard views or the hanzi view.
+fn show_hanzi(
+    progress: Res<Progress>,
+    mut typing: Query<&mut Node, (With<TypingOnly>, Without<crate::hanzi::HanziRoot>)>,
+    mut hanzi: Query<&mut Node, With<crate::hanzi::HanziRoot>>,
+) {
+    if !progress.is_changed() {
+        return;
+    }
+    let is_hanzi = progress.mode == ExerciseMode::Hanzi;
+    let show = |visible: bool| if visible { Display::Flex } else { Display::None };
+    for mut node in &mut typing {
+        // The exercise area hides its own parts.
+        let display = show(!is_hanzi);
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    for mut node in &mut hanzi {
+        let display = show(is_hanzi);
+        if node.display != display {
+            node.display = display;
+        }
+    }
+}
+
 fn show_hands(progress: Res<Progress>, mut hands: Query<&mut Node, With<HandsRoot>>) {
     if !progress.is_changed() {
         return;
     }
-    let display = if progress.show_hands { Display::Flex } else { Display::None };
+    let display = if progress.show_hands && progress.mode != ExerciseMode::Hanzi { Display::Flex } else { Display::None };
     for mut node in &mut hands {
         if node.display != display {
             node.display = display;
@@ -1135,8 +1281,13 @@ fn show_mode_views(
     }
 }
 
-fn update_lesson_label(exercise: Res<Exercise>, layout: Res<ActiveLayout>, mut labels: Query<&mut Text, With<LessonLabel>>) {
-    if !exercise.is_changed() && !layout.is_changed() {
+fn update_lesson_label(
+    exercise: Res<Exercise>,
+    layout: Res<ActiveLayout>,
+    progress: Res<Progress>,
+    mut labels: Query<&mut Text, With<LessonLabel>>,
+) {
+    if !exercise.is_changed() && !layout.is_changed() && !progress.is_changed() {
         return;
     }
     let text = match exercise.mode {
@@ -1158,9 +1309,12 @@ fn update_lesson_label(exercise: Res<Exercise>, layout: Res<ActiveLayout>, mut l
             format!("{} + {} · aLtErNaTe", middle.iter().collect::<String>(), columns.join(" "))
         }
         ExerciseMode::Shortcuts => "Esc, arrows, Ctrl, Alt".into(),
+        ExerciseMode::Hanzi => format!("Hanzi, level {}", progress.hanzi.level + 1),
     };
     for mut label in &mut labels {
-        label.0.clone_from(&text);
+        if label.0 != text {
+            label.0.clone_from(&text);
+        }
     }
 }
 

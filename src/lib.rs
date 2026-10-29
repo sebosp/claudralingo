@@ -7,6 +7,7 @@ pub mod drills;
 pub mod effects;
 pub mod game;
 pub mod hands;
+pub mod hanzi;
 pub mod keyboard;
 pub mod klavaro;
 pub mod layout;
@@ -34,6 +35,7 @@ impl Plugin for ClaudralingoPlugin {
             shortcuts::ShortcutsPlugin,
             background::BackgroundPlugin,
             zoom::ZoomPlugin,
+            hanzi::HanziPlugin,
         ));
     }
 }

@@ -57,7 +57,7 @@ pub fn goal(mode: ExerciseMode) -> f64 {
         ExerciseMode::Velocity => 95.0,
         ExerciseMode::Fluidness => 97.0,
         ExerciseMode::Fingers | ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::GOAL_ACCURACY,
-        ExerciseMode::Shortcuts => 100.0,
+        ExerciseMode::Shortcuts | ExerciseMode::Hanzi => 100.0,
     }
 }
 
@@ -207,7 +207,8 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         ExerciseMode::BounceLeft => crate::drills::draw_bounce(layout, true),
         ExerciseMode::BounceRight => crate::drills::draw_bounce(layout, false),
         // The shortcuts have their own tasks, see `crate::shortcuts`.
-        ExerciseMode::Shortcuts => String::new(),
+        // The shortcuts and the hanzi have their own exercises.
+        ExerciseMode::Shortcuts | ExerciseMode::Hanzi => String::new(),
     };
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     Exercise {
@@ -510,7 +511,7 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         }
         ExerciseMode::Fingers => crate::drills::comment(results.accuracy, exercise.finger),
         ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::bounce_comment(results.accuracy),
-        ExerciseMode::Shortcuts => String::new(),
+        ExerciseMode::Shortcuts | ExerciseMode::Hanzi => String::new(),
     };
     if results.n_errors == 0 {
         exercise.message = format!("Congratulations, not a single error! Well done.\n{}", exercise.message);
