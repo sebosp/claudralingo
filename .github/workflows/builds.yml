@@ -58,11 +58,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mold clang
           cargo install --locked cargo-apk
-      # The runner has the Android SDK and an NDK; cargo-apk signs with a debug key.
+      # The runner has the Android SDK and an NDK.
       - name: Build the APK
         run: |
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
+          # Signed with a debug key made here: installable, not for a store.
+          keytool -genkey -v -keystore "$RUNNER_TEMP/debug.keystore" -storepass android -alias androiddebugkey \
+            -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          export CARGO_APK_RELEASE_KEYSTORE="$RUNNER_TEMP/debug.keystore"
+          export CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
           cd mobile
           cargo apk build --release --lib
           find target -name "*.apk"
