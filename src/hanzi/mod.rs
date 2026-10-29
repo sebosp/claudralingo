@@ -113,6 +113,8 @@ pub struct Practice {
     /// The image needs drawing again.
     dirty: bool,
     started: bool,
+    /// When the word started, seconds since the UNIX epoch.
+    begun: u64,
 }
 
 /// The image of the drawing area.
@@ -367,7 +369,7 @@ fn taken_out(stroke: usize, n_strokes: usize, word: usize) -> bool {
 
 impl Practice {
     fn begin(&mut self, word: usize) {
-        *self = Practice { word, dirty: true, started: true, ..default() };
+        *self = Practice { word, dirty: true, started: true, begun: crate::progress::now_unix_seconds(), ..default() };
         self.message = "A new word: listen, then trace its strokes.".into();
     }
 
@@ -781,6 +783,19 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
     stats.practiced += 1;
     stats.strokes += practice.word_strokes;
     stats.misses += practice.word_misses;
+    // A session for the statistics of the day: the accuracy of the strokes.
+    let now = crate::progress::now_unix_seconds();
+    let total = (practice.word_strokes + practice.word_misses).max(1);
+    let session = crate::progress::Session {
+        mode: ExerciseMode::Hanzi,
+        lesson: Some(data.level_of(practice.word) + 1),
+        accuracy: 100.0 * practice.word_strokes as f64 / total as f64,
+        velocity: 0.0,
+        fluidness: 0.0,
+        finished_at: now,
+        elapsed: now.saturating_sub(practice.begun).min(600) as f64,
+    };
+    progress.current().sessions.push(session);
     let level = data.level_of(practice.word);
     let range = data.levels[level].words.clone();
     if practice.word + 1 < range.end {

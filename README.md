@@ -5,15 +5,12 @@ A typing tutor made with [Bevy](https://bevyengine.org) 0.20 and its
 
 ## Roadmap
 
-1. **Touch typing (now).** The exercises and the tutor logic of
+1. **Touch typing.** The exercises and the tutor logic of
    [Klavaro](https://sourceforge.net/projects/klavaro/) 3.14, ported to Rust, on an on-screen
-   keyboard: a row staggered QWERTY or a split Corne 3x5+3 (36 keys) with layers.
-2. **Chinese hanzi calligraphy (later).** Stroke order and stroke shapes of the hanzi, drawn with a
-   mouse, a pen or a touch screen. Keep it in mind while building the touch typing:
-   - the exercise is a list of "items to produce", for now characters typed on a keyboard, later
-     strokes or characters drawn on a canvas;
-   - the per item statistics (misses, timings, best and worst items) are not keyboard specific;
-   - the fonts need CJK coverage, the feathers fonts (Fira) do not have it.
+   keyboard: a row staggered QWERTY, the split Corne 3x5+3 and 3x6+3, the Lily58, or your own
+   ZMK keymap, with layers.
+2. **Chinese hanzi (now, HSK 1 to 4).** The words written stroke by stroke with a pen, a mouse or
+   a finger, then typed in pinyin, see [Hanzi](#hanzi).
 
 ## Touch typing
 
@@ -168,6 +165,59 @@ the node: bevy_ui draws the shapes up to the edges of their quads, rotated quads
 Other keyboards (Lily58, Corne 6 columns, tenkeyless, full size) are a physical layout and a
 keymap away, see `corne36` in `src/layout.rs`.
 
+## Layer course, real words and warm-up
+
+- **Layer course** (mode): the keys of each layer row by row (Lower: top row, home row...), then
+  the layer whole, then all the layers. A keyboard without layers has its symbols instead.
+- **Real words**: the basic lessons end with two lines of words of Klavaro's dictionary made of
+  the keys learned so far, once there are enough of them.
+- **Warm-up**: a session started after 4 hours begins with the keys that need it most, their
+  misses weighing more when they were not practiced for a while (a spaced repetition), then
+  goes back to its mode. It is also in the menu.
+- **Locked lessons** (setting, on by default): a lesson of the basic and the layer course, and a
+  hanzi level, opens when the previous one is passed.
+- **Auto shift**: a capital by a key held too long, or a capital missed, is named above the
+  keyboard and counted in the stats. On the screen, a bar under a pressed key fills to the
+  tapping term of the auto shift.
+- **Encouragements**: a line without errors clears like a row of Tetris with a word ("GREAT!",
+  "Are you a bot?"), a line with one slip clears in orange ("Almost!", "So close!"); a miss
+  streams lines out of the finger that should have pressed the key, in its color.
+
+## Keyboards
+
+The Corne 3x5+3 has the Typeractive default keymap, the Corne 3x6+3 and the Lily58 the default
+keymaps of ZMK (`corne.keymap`, `lily58.keymap`). The fingers and the rows come from the physical
+layouts of ZMK. "My ZMK keymap": paste your `.keymap` file (Settings, Paste ZMK keymap) or drop
+it on the window; a keymap of 36, 42 or 58 keys takes the matching physical layout, it is kept
+with the progress.
+
+## Stats
+
+The Stats button: today's minutes against the daily goal (10 minutes) and the streak of days that
+met it, the calendars of this month and the previous one (green: a lesson passed that day), the
+words per minute and the accuracy of the last 30 days (point at a day for its value, the goal of
+95% dashed), the exercises by type, and your best and most missed keys. The days are UTC days.
+
+## Hanzi
+
+The words of HSK 2.0 levels 1 to 4 (the lists of hsk.academy, 1193 words, the most frequent
+first), in levels of ten words: HSK 1 is 15 levels, HSK 2 15, HSK 3 30 and HSK 4 61. One word at a
+time, in five steps:
+
+1. trace the strokes in order over the whole outline, the next stroke highlighted,
+2. over a faded outline,
+3. fill in the strokes taken out of the character,
+4. on the empty grid, from memory,
+5. type its pinyin, letters or the nine keys of a phone (T9, in the settings), and pick the word.
+
+A stroke is compared with the strokes of the character as Hanzi Writer does (a port of its
+matcher): its distance, start and end, direction, shape (Fréchet distance) and length. A stroke
+drawn backwards or out of order is named; after three misses the stroke shows. A step with three
+misses is done again. The words are spoken (Listen, or Space while drawing). The pinyin
+candidates are the HSK words, then the words of the `inputx-pinyin` dictionary, with the
+characters of the embedded font. The data is made by `scripts/prepare_hanzi.py`, see
+`assets/hanzi/LICENSES.md`.
+
 ## Progress
 
 Native builds save the progress to `~/.config/claudralingo/progress.json` (`$XDG_CONFIG_HOME` if
@@ -204,7 +254,10 @@ trunk build --release                    # browser, into dist/
 (`<` is backspace, a tab is Tab, `*` presses the expected key or chord, and fakes the Alt+Tab
 round trip, `^` clicks the on-screen key the hints point at) and saves a screenshot, to check the
 screen without a keyboard. `CLAUDRALINGO_PREVIEW_LAYER=2` shows a layer, `CLAUDRALINGO_HELP=1`
-keeps the help of the first start open.
+keeps the help of the first start open, `CLAUDRALINGO_LESSONS=1` and `CLAUDRALINGO_STATS=1` open
+those panels, `CLAUDRALINGO_HANZI_STROKES=n` draws n strokes of the hanzi on their medians and
+`CLAUDRALINGO_HANZI_INPUT=33` types the pinyin step. The keys of the real keyboard are ignored
+during these runs.
 
 The help (`?` in the toolbar or F1) sums up the modes, the buttons and the keys, it opens by
 itself on the first start.
@@ -217,3 +270,6 @@ itself on the first start.
 - The look and the animations of the keyboard are inspired by
   [Layer Tutor](https://layer-tutor.pages.dev/), no code was copied.
 - The widgets, the Fira fonts and the dark theme come from bevy_feathers.
+- The hanzi data: HSK words (MIT), Make Me a Hanzi strokes (Arphic Public License), audio-cmn
+  recordings (CC BY-SA), Noto Sans CJK SC (OFL), the stroke matching of Hanzi Writer (MIT), see
+  `assets/hanzi/LICENSES.md`; the pinyin dictionary of `inputx-pinyin` (MIT or Apache-2.0).

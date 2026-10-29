@@ -39,6 +39,8 @@ pub mod tokens {
     pub const SELECTION: ThemeToken = ThemeToken::new_static("claudralingo.selection");
     pub const CURSOR: ThemeToken = ThemeToken::new_static("claudralingo.cursor");
     pub const SPARK_OK: ThemeToken = ThemeToken::new_static("claudralingo.spark.ok");
+    /// A line typed with one slip: almost.
+    pub const NEAR_MISS: ThemeToken = ThemeToken::new_static("claudralingo.near.miss");
     pub const SPARK_ERROR: ThemeToken = ThemeToken::new_static("claudralingo.spark.error");
     pub const PROGRESS_TRACK: ThemeToken = ThemeToken::new_static("claudralingo.progress.track");
     pub const PROGRESS_BAR: ThemeToken = ThemeToken::new_static("claudralingo.progress.bar");
@@ -126,6 +128,7 @@ pub fn dark_theme() -> ThemeProps {
     set(&mut props, &tokens::SELECTION, hex("#00e5ff").with_alpha(0.3));
     set(&mut props, &tokens::CURSOR, hex("#00e5ff"));
     set(&mut props, &tokens::SPARK_OK, hex("#00e5ff"));
+    set(&mut props, &tokens::NEAR_MISS, hex("#ffa62b"));
     set(&mut props, &tokens::SPARK_ERROR, hex("#ff1f4c"));
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#1b2542"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#00e5ff"));
@@ -207,6 +210,7 @@ pub fn light_theme() -> ThemeProps {
     set(&mut props, &tokens::SELECTION, hex("#0088b8").with_alpha(0.25));
     set(&mut props, &tokens::CURSOR, hex("#0088b8"));
     set(&mut props, &tokens::SPARK_OK, hex("#0088b8"));
+    set(&mut props, &tokens::NEAR_MISS, hex("#c46a00"));
     set(&mut props, &tokens::SPARK_ERROR, hex("#d8173f"));
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#d5d9e3"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#0088b8"));

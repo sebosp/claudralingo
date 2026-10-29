@@ -48,7 +48,14 @@ mod snapshot {
         let typing = std::env::var("CLAUDRALINGO_TYPE").unwrap_or_default().chars().collect();
         app.insert_resource(Snapshot { path, typing })
             .add_systems(Startup, no_vsync)
-            .add_systems(Update, run);
+            .add_systems(First, drop_real_keys)
+            .add_systems(Update, run.before(claudralingo::game::GameSystems));
+    }
+
+    /// The keys typed on the real keyboard while the window has the focus are not the test's:
+    /// the keys of the test are read in the frame they are sent, the others are dropped.
+    fn drop_real_keys(mut keys: ResMut<Messages<KeyboardInput>>) {
+        keys.drain().for_each(drop);
     }
 
     /// A window in the background is throttled by the compositor with vsync.
@@ -174,6 +181,8 @@ mod snapshot {
                 *panel = claudralingo::ui::Panel::Settings;
             } else if std::env::var_os("CLAUDRALINGO_LESSONS").is_some() {
                 *panel = claudralingo::ui::Panel::Lessons;
+            } else if std::env::var_os("CLAUDRALINGO_STATS").is_some() {
+                *panel = claudralingo::ui::Panel::Stats;
             } else if std::env::var_os("CLAUDRALINGO_HELP").is_none() {
                 *panel = claudralingo::ui::Panel::None;
             }

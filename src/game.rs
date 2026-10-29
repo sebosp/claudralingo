@@ -52,7 +52,7 @@ pub struct Exercise {
 /// at 95%.
 pub fn goal(mode: ExerciseMode) -> f64 {
     match mode {
-        ExerciseMode::Basic => klavaro::basic::GOAL_ACCURACY,
+        ExerciseMode::Basic | ExerciseMode::Layers | ExerciseMode::Review => klavaro::basic::GOAL_ACCURACY,
         ExerciseMode::Adaptability => 98.0,
         ExerciseMode::Velocity => 95.0,
         ExerciseMode::Fluidness => 97.0,
@@ -77,6 +77,8 @@ pub struct Coach {
     /// The plan of every target is shown, for the shortcuts.
     pub always_show: bool,
     last_touch: f64,
+    /// A word of advice above the keyboard, until the time given.
+    pub flash: Option<(String, f64)>,
 }
 
 impl Coach {
@@ -148,6 +150,7 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         let mut progress = Progress::load();
+        start_with_warmup(&mut progress);
         let layout = progress.layout.build();
         let grid = layout.klavaro_grid();
         let exercise = generate(&grid, &layout, &mut progress);
@@ -158,6 +161,7 @@ impl Plugin for GamePlugin {
             fade_legends: progress.fade_legends,
             layer_trainer: progress.layer_trainer,
             always_show: false,
+            flash: None,
             last_touch: 0.0,
         };
         app.insert_resource(exercise)
@@ -195,8 +199,32 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     let lesson = progress.current().basic_lesson.clamp(1, N_BASIC_LESSONS);
     let finger = progress.current().finger.clamp(1, 9);
     let char_set = klavaro::basic::lesson_char_set(lesson, grid);
+    let mut lesson = lesson;
+    let mut char_set = char_set;
     let text = match mode {
-        ExerciseMode::Basic => klavaro::basic::draw_lesson(&char_set),
+        // The drill, then real words of the keys learned so far.
+        ExerciseMode::Basic => {
+            let mut text = klavaro::basic::draw_lesson(&char_set);
+            if let Some(words) = crate::course::word_lines(&crate::course::learned_chars(grid, lesson), 2) {
+                text.push_str(&words);
+            }
+            text
+        }
+        ExerciseMode::Layers => {
+            let lessons = crate::course::layer_lessons(layout);
+            let current = progress.current();
+            current.layer_lesson = current.layer_lesson.clamp(1, lessons.len().max(1));
+            lesson = current.layer_lesson;
+            char_set = lessons.get(lesson - 1).map(|l| l.chars.clone()).unwrap_or_default();
+            klavaro::basic::draw_lesson(&char_set)
+        }
+        ExerciseMode::Review => {
+            let weak = crate::course::weak_keys(progress.current(), crate::progress::now_unix_seconds(), 6);
+            if weak.len() >= 2 {
+                char_set = weak;
+            }
+            klavaro::basic::draw_lesson(&char_set)
+        }
         ExerciseMode::Adaptability => {
             let accuracy = &progress.current().klavaro;
             klavaro::adaptability::draw_random_pattern(grid, accuracy, accuracy.needs_special_practice())
@@ -225,6 +253,21 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     }
 }
 
+/// A session started after a pause begins with the weak keys, then goes back to its mode.
+fn start_with_warmup(progress: &mut Progress) {
+    const PAUSE_SECONDS: u64 = 4 * 3600;
+    let now = crate::progress::now_unix_seconds();
+    let last = progress.layouts.values().flat_map(|l| l.sessions.last()).map(|s| s.finished_at).max();
+    let mode = progress.mode;
+    if !mode.is_typing() || mode == ExerciseMode::Review || last.is_none_or(|t| now.saturating_sub(t) < PAUSE_SECONDS) {
+        return;
+    }
+    if crate::course::weak_keys(progress.current(), now, 6).len() >= 3 {
+        progress.warmup_return = Some(mode);
+        progress.mode = ExerciseMode::Review;
+    }
+}
+
 fn new_exercise(
     mut exercise: ResMut<Exercise>,
     mut progress: ResMut<Progress>,
@@ -234,6 +277,13 @@ fn new_exercise(
     mut coach: ResMut<Coach>,
     time: Res<Time<Real>>,
 ) {
+    // After the warm-up, the mode of the session.
+    if exercise.mode == ExerciseMode::Review
+        && exercise.tutor.query == Query::End
+        && let Some(mode) = progress.warmup_return.take()
+    {
+        progress.mode = mode;
+    }
     if layout.is_changed() {
         grid.0 = layout.0.klavaro_grid();
     }
@@ -420,6 +470,7 @@ fn handle_typing(
                 if let Some(touch_time) = touch_time {
                     let stats = current.key(expected);
                     stats.hits += 1;
+                    stats.last = crate::progress::now_unix_seconds();
                     // Klavaro ignores the touch times of 3 seconds or more, the pauses.
                     stats.total_time += touch_time.min(3.0);
                 }
@@ -427,8 +478,25 @@ fn handle_typing(
             }
             Outcome::Wrong { expected, first, .. } => {
                 if first {
-                    current.key(expected).misses += 1;
+                    let stats = current.key(expected);
+                    stats.misses += 1;
+                    stats.last = crate::progress::now_unix_seconds();
                     *exercise.misses.entry(expected).or_default() += 1;
+                    // The auto shift: a capital by a key held too long, or not long enough.
+                    if layout.0.auto_shift && c != expected {
+                        let advice = if c == layout.0.shifted(expected) {
+                            current.auto_shift_long += 1;
+                            Some(format!("Held too long: {expected} came out as {c}, tap it shorter"))
+                        } else if expected == layout.0.shifted(c) {
+                            current.auto_shift_short += 1;
+                            Some(format!("{expected} needs the key held a moment longer, auto shift"))
+                        } else {
+                            None
+                        };
+                        if let Some(advice) = advice {
+                            coach.flash = Some((advice, now + 2.5));
+                        }
+                    }
                 }
                 TouchResult::Wrong
             }
@@ -493,7 +561,13 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
     };
     let mode = exercise.mode;
     exercise.message = match mode {
-        ExerciseMode::Basic => klavaro::basic::comment(results.accuracy, exercise.lesson).to_string(),
+        ExerciseMode::Basic | ExerciseMode::Layers => {
+            klavaro::basic::comment(results.accuracy, exercise.lesson).to_string()
+        }
+        ExerciseMode::Review => {
+            let keys: String = exercise.char_set.iter().collect();
+            format!("Warm-up done on {keys}. Enter goes on with the session.")
+        }
         ExerciseMode::Adaptability => klavaro::adaptability::comment(results.accuracy),
         ExerciseMode::Velocity => klavaro::velocity::comment(results.accuracy, results.velocity),
         ExerciseMode::Fluidness => {
@@ -528,17 +602,25 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         }
     } else if mode == ExerciseMode::Basic && exercise.lesson < N_BASIC_LESSONS {
         exercise.message.push_str(&format!("\nLesson {} unlocked.", exercise.lesson + 1));
+    } else if mode == ExerciseMode::Layers && exercise.lesson < crate::course::layer_lessons(layout).len() {
+        exercise.message.push_str(&format!("\nLayer lesson {} unlocked.", exercise.lesson + 1));
     }
+    let n_layer_lessons = crate::course::layer_lessons(layout).len().max(1);
     let current = progress.current();
     if mode == ExerciseMode::Basic && results.accuracy >= klavaro::basic::GOAL_ACCURACY {
         current.basic_lesson = (exercise.lesson + 1).min(N_BASIC_LESSONS);
+        current.basic_unlocked = current.basic_unlocked.max(current.basic_lesson);
+    }
+    if mode == ExerciseMode::Layers && results.accuracy >= goal(mode) {
+        current.layer_lesson = (exercise.lesson + 1).min(n_layer_lessons);
+        current.layer_unlocked = current.layer_unlocked.max(current.layer_lesson);
     }
     let may_log = mode != ExerciseMode::Fluidness || results.n_touchs >= klavaro::tutor::MIN_CHARS_TO_LOG;
     if may_log {
         current.sessions.push(Session {
             mode,
             lesson: match mode {
-                ExerciseMode::Basic => Some(exercise.lesson),
+                ExerciseMode::Basic | ExerciseMode::Layers => Some(exercise.lesson),
                 ExerciseMode::Fingers => Some(exercise.finger as usize),
                 _ => None,
             },
@@ -546,6 +628,7 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             velocity: results.velocity,
             fluidness: results.fluidness,
             finished_at: now_unix_seconds(),
+            elapsed: results.elapsed,
         });
     }
     progress.save();

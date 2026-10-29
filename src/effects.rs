@@ -76,6 +76,32 @@ struct RowClear {
     age: f32,
     /// The height of the line before.
     height: f32,
+    /// Green when perfect, orange with one slip.
+    color: Color,
+}
+
+/// A word of encouragement over a cleared line, rising and fading.
+#[derive(Component)]
+struct FloatText {
+    age: f32,
+    start: Vec2,
+    color: Color,
+}
+
+const FLOAT_SECONDS: f32 = 1.4;
+/// Over a perfect line.
+const CHEERS: [&str; 8] = ["GREAT!", "WOW!", "AMAZING!", "Are you a bot?", "Flawless!", "Perfect!", "On fire!", "Superb!"];
+/// Over a line with one slip.
+const ALMOST: [&str; 6] = ["Almost!", "So close!", "Next time!", "That one shouldn't count!", "One slip, no worries", "Nearly perfect!"];
+
+/// A streak of light out of a finger that missed its key.
+#[derive(Component)]
+struct Streak {
+    position: Vec2,
+    velocity: Vec2,
+    age: f32,
+    life: f32,
+    color: Color,
 }
 
 const ROW_FLASH_SECONDS: f32 = 0.3;
@@ -100,6 +126,8 @@ impl Plugin for EffectsPlugin {
                 start_celebration,
                 detect_row_clears,
                 animate_row_clears,
+                animate_float_texts,
+                animate_streaks,
                 celebrate,
                 animate_rockets,
                 fade_in_message,
@@ -273,20 +301,38 @@ fn detect_row_clears(
             continue;
         }
         cleared.1[i] = true;
-        let perfect = (*start..*end).all(|c| tutor.states[c] == CharState::Correct);
+        let slips = (*start..*end).filter(|c| tutor.states[*c] != CharState::Correct).count();
         let Ok((node, transform, computed)) = lines.get(*entity) else {
             continue;
         };
-        if !perfect || ended || progress.reduce_motion {
+        if slips > 1 || ended {
+            continue;
+        }
+        let at = center(transform, computed);
+        // A word over the line, still with reduced motion.
+        let (words, token) = if slips == 0 { (&CHEERS[..], tokens::CHAR_CORRECT) } else { (&ALMOST[..], tokens::NEAR_MISS) };
+        let color = theme.color(&token);
+        commands.spawn((
+            Text::new(words[fastrand::usize(..words.len())]),
+            TextFont { font_size: FontSize::Px(30.0), ..default() },
+            TextColor(color),
+            Node { position_type: PositionType::Absolute, left: px(at.x - 80.0), top: px(at.y - 62.0), ..default() },
+            GlobalZIndex(120),
+            Pickable::IGNORE,
+            FloatText { age: 0.0, start: Vec2::new(at.x - 80.0, at.y - 62.0), color },
+        ));
+        if progress.reduce_motion {
             continue;
         }
         let height = match node.height {
             Val::Px(h) => h,
             _ => computed.size().y * computed.inverse_scale_factor(),
         };
-        commands.entity(*entity).insert(RowClear { age: 0.0, height });
+        commands.entity(*entity).insert(RowClear { age: 0.0, height, color });
+        if slips > 0 {
+            continue;
+        }
         // A small firework from the middle of the row, and sparks along it.
-        let at = center(transform, computed);
         let width = computed.size().x * computed.inverse_scale_factor();
         for k in 0..24 {
             let angle = TAU * k as f32 / 24.0 + fastrand::f32() * 0.2;
@@ -303,14 +349,13 @@ fn detect_row_clears(
 
 fn animate_row_clears(
     time: Res<Time>,
-    theme: Res<UiTheme>,
     mut rows: Query<(Entity, &mut RowClear, &mut Node, &Children)>,
     mut chars: Query<(&PromptChar, &mut UiTransform, &mut BackgroundColor), Without<RowClear>>,
     mut commands: Commands,
 ) {
-    let flash = theme.color(&tokens::CHAR_CORRECT);
     for (entity, mut row, mut node, children) in &mut rows {
         row.age += time.delta_secs();
+        let flash = row.color;
         let first = children.iter().find_map(|c| chars.get(c).ok().map(|(p, _, _)| p.0)).unwrap_or(0);
         for child in children.iter() {
             let Ok((PromptChar(index), mut transform, mut background)) = chars.get_mut(child) else {
@@ -335,6 +380,43 @@ fn animate_row_clears(
         if close >= 1.0 {
             commands.entity(entity).remove::<RowClear>();
         }
+    }
+}
+
+fn animate_float_texts(
+    time: Res<Time>,
+    progress: Res<crate::progress::Progress>,
+    mut texts: Query<(Entity, &mut FloatText, &mut Node, &mut TextColor)>,
+    mut commands: Commands,
+) {
+    for (entity, mut float, mut node, mut color) in &mut texts {
+        float.age += time.delta_secs();
+        let k = float.age / FLOAT_SECONDS;
+        if k >= 1.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let rise = if progress.reduce_motion { 0.0 } else { 36.0 * k };
+        node.top = px(float.start.y - rise);
+        // Shown, then fading in the second half.
+        color.0 = float.color.with_alpha(if k < 0.5 { 1.0 } else { 2.0 * (1.0 - k) });
+    }
+}
+
+fn animate_streaks(time: Res<Time>, mut streaks: Query<(Entity, &mut Streak, &mut Node, &mut BackgroundColor)>, mut commands: Commands) {
+    let dt = time.delta_secs();
+    for (entity, mut streak, mut node, mut color) in &mut streaks {
+        streak.age += dt;
+        if streak.age >= streak.life {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let velocity = streak.velocity;
+        streak.position += velocity * dt;
+        node.left = px(streak.position.x);
+        node.top = px(streak.position.y);
+        let k = streak.age / streak.life;
+        color.0 = streak.color.with_alpha(0.7 * (1.0 - k));
     }
 }
 
@@ -385,6 +467,8 @@ fn on_touch(
     theme: Res<UiTheme>,
     progress: Res<crate::progress::Progress>,
     nodes: Query<(&UiGlobalTransform, &ComputedNode)>,
+    fingers: Query<(&crate::hands::Finger, &UiGlobalTransform, &ComputedNode)>,
+    layout: Res<crate::game::ActiveLayout>,
     mut commands: Commands,
 ) {
     let calm = progress.reduce_motion;
@@ -405,6 +489,38 @@ fn on_touch(
             && let Ok((transform, node)) = nodes.get(key)
         {
             spawn_sparks(&mut commands, center(transform, node), theme.color(&token), error);
+        }
+        // The lines stream out of the finger that missed, in its color.
+        if error
+            && let Some(spec) = touch.expected.and_then(|k| layout.0.keys.get(k))
+            && let Some((transform, node)) = fingers
+                .iter()
+                .find(|(f, _, _)| f.finger == spec.finger && (spec.finger != 5 || f.left == spec.left))
+                .map(|(_, t, n)| (t, n))
+        {
+            let at = center(transform, node);
+            let color = theme.color(&tokens::FINGERS[spec.finger.min(9) as usize]);
+            for _ in 0..9 {
+                let angle = -TAU / 4.0 + (fastrand::f32() - 0.5) * 2.2;
+                let speed = 160.0 + 220.0 * fastrand::f32();
+                let length = 18.0 + 30.0 * fastrand::f32();
+                commands.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(at.x),
+                        top: px(at.y),
+                        width: px(2),
+                        height: px(length),
+                        ..default()
+                    },
+                    // Along its way.
+                    UiTransform { rotation: Rot2::radians(angle - TAU / 4.0), ..default() },
+                    BackgroundColor(color),
+                    GlobalZIndex(90),
+                    Pickable::IGNORE,
+                    Streak { position: at, velocity: Vec2::from_angle(angle) * speed, age: 0.0, life: 1.1, color },
+                ));
+            }
         }
         if !touch.shake || exercise.tutor.states.is_empty() {
             continue;

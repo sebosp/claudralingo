@@ -515,6 +515,7 @@ fn finish(drill: &mut Drill, progress: &mut Progress) {
         velocity: 0.0,
         fluidness: 0.0,
         finished_at: now_unix_seconds(),
+        elapsed,
     });
     progress.save();
 }

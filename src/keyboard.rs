@@ -154,12 +154,40 @@ impl KeyboardView {
 
 pub struct KeyboardPlugin;
 
+/// The time an on-screen key is held, against the tapping term.
+#[derive(Component)]
+struct HoldBar {
+    since: f32,
+}
+
+fn fill_hold_bars(
+    time: Res<Time<Real>>,
+    theme: Res<UiTheme>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    mut bars: Query<(Entity, &HoldBar, &mut Node, &mut BackgroundColor)>,
+    mut commands: Commands,
+) {
+    let held = mouse.pressed(MouseButton::Left) || touches.iter().next().is_some();
+    for (entity, bar, mut node, mut color) in &mut bars {
+        if !held {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let k = ((time.elapsed_secs() - bar.since) / TAPPING_TERM).min(1.0);
+        node.width = percent(80.0 * k);
+        // The capital: the color of Shift once the term is reached.
+        let token = if k >= 1.0 { tokens::KEY_SHIFT } else { tokens::CURSOR };
+        color.0 = theme.color(&token);
+    }
+}
+
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "key.wgsl");
         app.add_plugins(UiMaterialPlugin::<KeyMaterial>::default())
             .init_resource::<KeyboardView>()
-            .add_systems(Update, (rebuild_keyboard, update_hints).chain().after(crate::game::GameSystems));
+            .add_systems(Update, (rebuild_keyboard, update_hints, fill_hold_bars).chain().after(crate::game::GameSystems));
     }
 }
 
@@ -259,6 +287,34 @@ fn spawn_key(
             view.clicks.push((index, click.duration.as_secs_f32() >= TAPPING_TERM));
         }
     });
+    // While pressed, a bar fills to the tapping term of the auto shift: past it, the key types
+    // its capital.
+    commands
+        .entity(node)
+        .observe(move |press: On<PointerPress>, time: Res<Time<Real>>, mut commands: Commands| {
+            if press.button == PointerButton::Primary {
+                commands.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: percent(10),
+                        bottom: px(-7),
+                        width: percent(0),
+                        height: px(4),
+                        border_radius: BorderRadius::all(px(2)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::NONE),
+                    Pickable::IGNORE,
+                    HoldBar { since: time.elapsed_secs() },
+                    ChildOf(press.entity),
+                ));
+            }
+        })
+        .observe(|_: On<PointerRelease>, bars: Query<Entity, With<HoldBar>>, mut commands: Commands| {
+            for bar in &bars {
+                commands.entity(bar).despawn();
+            }
+        });
     if let Some(Special::Layer(layer)) = key.special {
         commands
             .entity(node)
@@ -418,6 +474,7 @@ fn update_hints(
     layout: Res<ActiveLayout>,
     theme: Res<UiTheme>,
     time: Res<Time>,
+    real: Res<Time<Real>>,
     mut view: ResMut<KeyboardView>,
     mut materials: ResMut<Assets<KeyMaterial>>,
     mut caps: Query<&mut KeyCap>,
@@ -589,7 +646,10 @@ fn update_hints(
         view.review = review;
     }
 
-    let instructions = if let Some(hint) = layer_hint {
+    let flash = coach.flash.as_ref().filter(|(_, until)| real.elapsed_secs_f64() < *until);
+    let instructions = if let Some((advice, _)) = flash {
+        advice.clone()
+    } else if let Some(hint) = layer_hint {
         hint
     } else if !armed.is_empty() {
         let names: Vec<String> = armed.iter().map(|m| m.name(names)).collect();

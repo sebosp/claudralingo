@@ -61,7 +61,7 @@ struct ProgressBar;
 pub struct MessageText;
 
 #[derive(Component, Default, Clone)]
-struct RankingText;
+pub struct RankingText;
 
 /// The accuracy at the end, green when the goal is reached, red otherwise.
 #[derive(Component, Default, Clone)]
@@ -86,6 +86,7 @@ enum Setting {
     FitWindow,
     PinyinKeypad,
     Sound,
+    LockLessons,
 }
 
 #[derive(Component, Default, Clone)]
@@ -137,6 +138,7 @@ pub enum Panel {
     Help,
     Settings,
     Lessons,
+    Stats,
 }
 
 impl Panel {
@@ -147,34 +149,31 @@ impl Panel {
 
 const HELP: &str = "\
 MODES, the first menu
-  Basic course, Adaptability, Velocity, Fluidness: the exercises of Klavaro
-  Finger drill: one finger up and down its keys, ‹ › picks the finger
-  Left and Right hand finger bounce: middle and index finger in turns, aLtErNaTiNg case
-  Shortcuts & keys: Esc, arrows, numbers, symbols, Ctrl and Alt shortcuts, Alt+Tab
+  Basic course, Adaptability, Velocity, Fluidness: the exercises of Klavaro, real words at the end
+  Layer course: the keys of Lower and Raise row by row    Warm-up: your weak keys, after a pause
+  Finger drill, Left and Right hand finger bounce: one finger, or middle and index in turns
+  Shortcuts & keys: Esc, arrows, Ctrl and Alt shortcuts, Alt+Tab
+  Hanzi (HSK 1-4): write each word with a pen, mouse or finger, then type its pinyin
 
 TOOLBAR
-  ‹ ›  the lesson, the finger or the hand    Restart  a new text
-  Lessons  the lessons of the basic course with your accuracy, click one to practice it again
-  Settings  the keyboard, dark mode, the background, motion, hands, text size, zoom and:
-    Fade legends  the letters fade while you type well, an error or a pause shows the next key
-    Layer trainer  always shows the layer and the modifier keys to hold
+  ‹ ›  the lesson, the finger, the hand or the hanzi level    Restart  a new text
+  Lessons  your lessons and levels    Stats  calendar, words per minute, accuracy, your keys
+  Settings  the keyboard (paste or drop a ZMK keymap), dark mode, locked lessons, zoom, T9, sound
 
 TYPING
   Backspace erases the errors, Ctrl+Backspace all of them
-  Zoom: Ctrl and the mouse wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0, or the Settings
+  A line without errors clears in green, with one slip in orange
+  Zoom: Ctrl and the mouse wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0
   At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill
 
 COLORS
   green the next key, purple shift or hold the key longer (auto shift), amber hold, red backspace
-  The stripes of the keys and the hands below show the finger of every key
+  The stripes of the keys and the hands show the finger of every key, a miss streams out of it
 
 ON-SCREEN KEYBOARD
-  Click a key to type it, a long press types it shifted
+  Click a key to type it, hold it past the bar under it for the capital (auto shift)
   Lower and Raise: click to show and use their layer, click again to go back, or hold them
   Ctrl, Alt, Win: click them, then the key: they are never sent to your system
-
-BACKGROUND
-  Its colors are the fingers and layers of your most missed keys, named under Your keys
 
 F1 or ? opens this help, Esc or a click closes it. The progress is saved in ~/.config/claudralingo";
 
@@ -201,7 +200,7 @@ impl Plugin for UiPlugin {
                 show_hands,
                 show_hanzi,
                 import_keymap,
-                update_rankings.run_if(resource_changed::<Progress>),
+                update_rankings.run_if(|p: Res<Progress>, panel: Res<Panel>| p.is_changed() || panel.is_changed()),
                 update_zoom_label.run_if(resource_changed::<UiScale>),
             )
                 .after(crate::game::GameSystems),
@@ -339,9 +338,6 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                 HandsRoot
                 --
                 @flex_spacer()
-                --
-                @rankings()
-            TypingOnly
             ]
             --
             @help_overlay()
@@ -349,6 +345,8 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
             @settings_overlay(layouts, backgrounds)
             --
             @lessons_overlay()
+            --
+            @crate::stats::overlay()
         ]
     }
 }
@@ -403,6 +401,11 @@ fn toolbar(modes: Box<dyn SceneList>) -> impl Scene {
                 @caption: bsn! { @caption("Lessons") }
             }
             on(toggle_lessons)
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("Stats") }
+            }
+            on(toggle_stats)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("Settings") }
@@ -527,6 +530,8 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         }
                         on(on_background_change)
                     ]
+                    --
+                    @setting_checkbox(Setting::LockLessons, "Lock lessons: pass a lesson (95%) to open the next one")
                     --
                     @setting_checkbox(Setting::FadeLegends, "Fade legends: the letters fade while you type well")
                     --
@@ -695,6 +700,7 @@ fn fill_lessons(
         ..default()
     };
     let current = progress.layouts.get(progress.layout.key()).map(|l| l.basic_lesson).unwrap_or(1);
+    let unlocked = progress.layouts.get(progress.layout.key()).map(|l| l.basic_unlocked).unwrap_or(1);
     let goal = crate::klavaro::basic::GOAL_ACCURACY;
     for root in &grids {
         commands.entity(root).despawn_children();
@@ -715,6 +721,8 @@ fn fill_lessons(
                 None => (None, "not yet".to_string()),
             };
             let border = if lesson == current { theme.color(&tokens::CURSOR) } else { Color::NONE };
+            let locked = progress.lock_lessons && lesson > unlocked;
+            let detail = if locked { "locked".to_string() } else { detail };
             let tile = commands
                 .spawn((
                     Node {
@@ -732,6 +740,9 @@ fn fill_lessons(
                     ChildOf(root),
                 ))
                 .observe(move |_: On<PointerClick>, mut progress: ResMut<Progress>, mut panel: ResMut<Panel>, mut new_exercise: MessageWriter<NewExercise>| {
+                    if locked {
+                        return;
+                    }
                     progress.mode = ExerciseMode::Basic;
                     progress.current().basic_lesson = lesson;
                     progress.save();
@@ -788,6 +799,8 @@ fn fill_hanzi_levels(
                 None => (None, "not yet".into()),
             };
             let border = if i == progress.hanzi.level { theme.color(&tokens::CURSOR) } else { Color::NONE };
+            let locked = progress.lock_lessons && i > hanzi_unlocked(progress);
+            let detail = if locked { "locked".to_string() } else { detail };
             let tile = commands
                 .spawn((
                     Node {
@@ -805,6 +818,9 @@ fn fill_hanzi_levels(
                     ChildOf(root),
                 ))
                 .observe(move |_: On<PointerClick>, mut progress: ResMut<Progress>, mut panel: ResMut<Panel>| {
+                    if locked {
+                        return;
+                    }
                     progress.mode = ExerciseMode::Hanzi;
                     progress.hanzi.level = i;
                     progress.hanzi.word = 0;
@@ -898,25 +914,6 @@ fn stats_bar() -> impl Scene {
     }
 }
 
-fn rankings() -> impl Scene {
-    bsn! {
-        Node {
-            width: px(820),
-            margin: UiRect::bottom(px(10)),
-        }
-        Children [
-            @group()
-            Node {
-                flex_grow: 1.0,
-            }
-            Children [
-                @group_header() Children [ @label("Your keys") ]
-                --
-                @group_body() Children [ @label_dim("") RankingText ]
-            ]
-        ]
-    }
-}
 
 impl Setting {
     fn get(self, progress: &Progress) -> bool {
@@ -930,6 +927,7 @@ impl Setting {
             Setting::FitWindow => progress.fit_window,
             Setting::PinyinKeypad => progress.pinyin_keypad,
             Setting::Sound => progress.sound,
+            Setting::LockLessons => progress.lock_lessons,
         }
     }
 }
@@ -978,6 +976,7 @@ fn on_setting_change(
         Setting::FitWindow => progress.fit_window = change.value,
         Setting::PinyinKeypad => progress.pinyin_keypad = change.value,
         Setting::Sound => progress.sound = change.value,
+        Setting::LockLessons => progress.lock_lessons = change.value,
     }
     progress.save();
     release_focus(&mut focus);
@@ -1107,7 +1106,13 @@ fn on_layout_change(
 
 /// ‹ and › change the finger in the finger drills, the hand in the bounces, the basic lesson
 /// otherwise.
-fn change_lesson(progress: &mut Progress, delta: isize) {
+/// The last hanzi level open with the lessons locked: the ones done and the next one.
+pub fn hanzi_unlocked(progress: &Progress) -> usize {
+    progress.hanzi.levels_done.keys().map(|l| l + 1).max().unwrap_or(0).max(progress.hanzi.level)
+}
+
+fn change_lesson(progress: &mut Progress, layout: &crate::layout::Layout, delta: isize) {
+    let locked = progress.lock_lessons;
     if matches!(progress.mode, ExerciseMode::BounceLeft | ExerciseMode::BounceRight) {
         // The other hand.
         progress.mode = if progress.mode == ExerciseMode::BounceLeft {
@@ -1116,15 +1121,33 @@ fn change_lesson(progress: &mut Progress, delta: isize) {
             ExerciseMode::BounceLeft
         };
     } else if progress.mode == ExerciseMode::Hanzi {
-        progress.hanzi.level = progress.hanzi.level.saturating_add_signed(delta);
-        progress.hanzi.word = 0;
+        let mut level = progress.hanzi.level.saturating_add_signed(delta);
+        if locked {
+            level = level.min(hanzi_unlocked(progress));
+        }
+        if level != progress.hanzi.level {
+            progress.hanzi.level = level;
+            progress.hanzi.word = 0;
+        }
+    } else if progress.mode == ExerciseMode::Layers {
+        let n = crate::course::layer_lessons(layout).len().max(1);
+        let current = progress.current();
+        let mut lesson = current.layer_lesson.saturating_add_signed(delta).clamp(1, n);
+        if locked {
+            lesson = lesson.min(current.layer_unlocked);
+        }
+        current.layer_lesson = lesson;
     } else if progress.mode == ExerciseMode::Fingers {
         let current = progress.current();
         let i = FINGERS.iter().position(|f| *f == current.finger).unwrap_or(0);
         current.finger = FINGERS[(i as isize + delta).rem_euclid(FINGERS.len() as isize) as usize];
     } else {
         let current = progress.current();
-        current.basic_lesson = current.basic_lesson.saturating_add_signed(delta).clamp(1, N_BASIC_LESSONS);
+        let mut lesson = current.basic_lesson.saturating_add_signed(delta).clamp(1, N_BASIC_LESSONS);
+        if locked {
+            lesson = lesson.min(current.basic_unlocked);
+        }
+        current.basic_lesson = lesson;
         progress.mode = ExerciseMode::Basic;
     }
     progress.save();
@@ -1133,10 +1156,11 @@ fn change_lesson(progress: &mut Progress, delta: isize) {
 fn previous_lesson(
     _: On<Activate>,
     mut progress: ResMut<Progress>,
+    layout: Res<ActiveLayout>,
     mut new_exercise: MessageWriter<NewExercise>,
     mut focus: ResMut<InputFocus>,
 ) {
-    change_lesson(&mut progress, -1);
+    change_lesson(&mut progress, &layout.0, -1);
     new_exercise.write_default();
     release_focus(&mut focus);
 }
@@ -1144,10 +1168,11 @@ fn previous_lesson(
 fn next_lesson(
     _: On<Activate>,
     mut progress: ResMut<Progress>,
+    layout: Res<ActiveLayout>,
     mut new_exercise: MessageWriter<NewExercise>,
     mut focus: ResMut<InputFocus>,
 ) {
-    change_lesson(&mut progress, 1);
+    change_lesson(&mut progress, &layout.0, 1);
     new_exercise.write_default();
     release_focus(&mut focus);
 }
@@ -1225,6 +1250,11 @@ fn first_help(mut progress: ResMut<Progress>, mut panel: ResMut<Panel>) {
 
 fn toggle_help(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
     panel.toggle(Panel::Help);
+    release_focus(&mut focus);
+}
+
+fn toggle_stats(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    panel.toggle(Panel::Stats);
     release_focus(&mut focus);
 }
 
@@ -1381,6 +1411,15 @@ fn update_lesson_label(
         ExerciseMode::Basic => {
             let chars: Vec<String> = exercise.char_set.iter().copied().map(display_char).collect();
             format!("Lesson {}/{N_BASIC_LESSONS}: {}", exercise.lesson, chars.join(" "))
+        }
+        ExerciseMode::Layers => {
+            let lessons = crate::course::layer_lessons(&layout.0);
+            let name = lessons.get(exercise.lesson.saturating_sub(1)).map(|l| l.name.clone()).unwrap_or_default();
+            format!("Layer lesson {}/{}: {name}", exercise.lesson, lessons.len())
+        }
+        ExerciseMode::Review => {
+            let chars: Vec<String> = exercise.char_set.iter().copied().map(display_char).collect();
+            format!("Warm-up: {}", chars.join(" "))
         }
         ExerciseMode::Adaptability => "Random words, your errors first".into(),
         ExerciseMode::Velocity => "Random words of the dictionary".into(),
@@ -1572,18 +1611,20 @@ fn update_rankings(
     fingers.sort_by(|a, b| a.1.total_cmp(&b.1));
     let fingers: Vec<String> =
         fingers.iter().take(3).map(|(f, accuracy)| format!("{} {accuracy:.0}%", finger_name(*f))).collect();
-    // The colors of the background, named.
-    let focus: Vec<String> =
-        crate::background::focus(&layout.0, current).into_iter().map(|f| f.name(&layout.0)).collect();
     let mut text = format!(
-        "Best keys: {}\nMost missed: {}\nWeakest fingers: {}\nFocus, the colors of the background: {}\n{} · {} exercises done",
+        "Best keys: {}\nMost missed: {}\nWeakest fingers: {}\n{} · {} exercises done",
         list(&current.best_keys),
         if misses.is_empty() { "none".to_string() } else { misses.join("   ") },
         if fingers.is_empty() { "not enough touches yet".to_string() } else { fingers.join("   ") },
-        if focus.is_empty() { "no misses yet".to_string() } else { focus.join(", ") },
         layout_id.name(),
         current.sessions.len(),
     );
+    if current.auto_shift_long + current.auto_shift_short > 0 {
+        text.push_str(&format!(
+            "\nAuto shift: {} capitals by a key held too long, {} capitals not held long enough",
+            current.auto_shift_long, current.auto_shift_short
+        ));
+    }
     if let Some(best) = current.alt_tab_best {
         text.push_str(&format!(" · best Alt+Tab round trip {best:.1} s"));
     }

@@ -21,6 +21,10 @@ const N_RANKED_KEYS: usize = 10;
 pub enum ExerciseMode {
     #[default]
     Basic,
+    /// The keys of the layers, row by row, see [`crate::course`].
+    Layers,
+    /// The keys most needed, at the start of a session.
+    Review,
     Adaptability,
     Velocity,
     Fluidness,
@@ -36,8 +40,10 @@ pub enum ExerciseMode {
 }
 
 impl ExerciseMode {
-    pub const ALL: [ExerciseMode; 9] = [
+    pub const ALL: [ExerciseMode; 11] = [
         ExerciseMode::Basic,
+        ExerciseMode::Layers,
+        ExerciseMode::Review,
         ExerciseMode::Adaptability,
         ExerciseMode::Velocity,
         ExerciseMode::Fluidness,
@@ -51,6 +57,8 @@ impl ExerciseMode {
     pub fn name(self) -> &'static str {
         match self {
             ExerciseMode::Basic => "Basic course",
+            ExerciseMode::Layers => "Layer course",
+            ExerciseMode::Review => "Warm-up: weak keys",
             ExerciseMode::Adaptability => "Adaptability",
             ExerciseMode::Velocity => "Velocity",
             ExerciseMode::Fluidness => "Fluidness",
@@ -99,7 +107,10 @@ impl BackgroundLevel {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct KeyStats {
+    /// When the key was last typed, seconds since the UNIX epoch, for the warm-up.
+    pub last: u64,
     /// Typed right on the first try.
     pub hits: u64,
     /// Typed wrong when this key was expected.
@@ -121,6 +132,9 @@ impl KeyStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    /// The seconds of typing, for the minutes of the day.
+    #[serde(default)]
+    pub elapsed: f64,
     pub mode: ExerciseMode,
     pub lesson: Option<usize>,
     pub accuracy: f64,
@@ -149,6 +163,14 @@ pub struct LayoutProgress {
     pub shortcuts: BTreeMap<String, KeyStats>,
     /// The fastest Alt+Tab round trip, in seconds.
     pub alt_tab_best: Option<f64>,
+    /// The last basic lesson open with the lessons locked: the ones passed and the next one.
+    pub basic_unlocked: usize,
+    /// The lesson of the layer course, 1 based, and the last one open.
+    pub layer_lesson: usize,
+    pub layer_unlocked: usize,
+    /// The auto shift missed: a capital held too long by mistake, a capital not held enough.
+    pub auto_shift_long: u64,
+    pub auto_shift_short: u64,
 }
 
 impl Default for LayoutProgress {
@@ -163,6 +185,11 @@ impl Default for LayoutProgress {
             finger: 4,
             shortcuts: BTreeMap::new(),
             alt_tab_best: None,
+            basic_unlocked: 1,
+            layer_lesson: 1,
+            layer_unlocked: 1,
+            auto_shift_long: 0,
+            auto_shift_short: 0,
         }
     }
 }
@@ -236,6 +263,12 @@ pub struct Progress {
     pub hanzi: HanziProgress,
     /// The `.keymap` file of ZMK imported, the layout "My ZMK keymap".
     pub custom_keymap: Option<String>,
+    /// A lesson opens when the previous one is passed.
+    pub lock_lessons: bool,
+    /// The mode to go back to after the warm-up of a session.
+    pub warmup_return: Option<ExerciseMode>,
+    /// The minutes of practice of a day, for the streak.
+    pub daily_goal_minutes: u32,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -281,6 +314,9 @@ impl Default for Progress {
             sound: true,
             hanzi: HanziProgress::default(),
             custom_keymap: None,
+            lock_lessons: true,
+            warmup_return: None,
+            daily_goal_minutes: 10,
             layouts: BTreeMap::new(),
         }
     }
@@ -303,6 +339,9 @@ impl Progress {
             .unwrap_or_default();
         for layout in progress.layouts.values_mut() {
             layout.klavaro.sanitize();
+            // The lessons reached before the locks are open.
+            layout.basic_unlocked = layout.basic_unlocked.max(layout.basic_lesson);
+            layout.layer_unlocked = layout.layer_unlocked.max(layout.layer_lesson);
         }
         crate::layout::set_custom_keymap(progress.custom_keymap.clone());
         progress
@@ -402,10 +441,10 @@ mod tests {
     #[test]
     fn rankings() {
         let mut p = LayoutProgress::default();
-        *p.key('a') = KeyStats { hits: 30, misses: 0, total_time: 6.0 };
-        *p.key('s') = KeyStats { hits: 30, misses: 0, total_time: 3.0 };
-        *p.key('d') = KeyStats { hits: 20, misses: 10, total_time: 3.0 };
-        *p.key('f') = KeyStats { hits: 1, misses: 1, total_time: 3.0 };
+        *p.key('a') = KeyStats { hits: 30, misses: 0, total_time: 6.0, last: 0 };
+        *p.key('s') = KeyStats { hits: 30, misses: 0, total_time: 3.0, last: 0 };
+        *p.key('d') = KeyStats { hits: 20, misses: 10, total_time: 3.0, last: 0 };
+        *p.key('f') = KeyStats { hits: 1, misses: 1, total_time: 3.0, last: 0 };
         p.update_rankings();
         assert_eq!(p.best_keys, vec!["s", "a", "d"]);
         assert_eq!(p.most_missed, vec!["d", "f"]);
