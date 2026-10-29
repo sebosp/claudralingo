@@ -14,15 +14,23 @@ pub enum LayoutId {
     QwertyUs,
     #[default]
     Corne36,
+    Corne42,
+    Lily58,
+    /// A keymap of ZMK imported in the settings, see [`set_custom_keymap`].
+    Custom,
 }
 
 impl LayoutId {
-    pub const ALL: [LayoutId; 2] = [LayoutId::QwertyUs, LayoutId::Corne36];
+    pub const ALL: [LayoutId; 5] =
+        [LayoutId::QwertyUs, LayoutId::Corne36, LayoutId::Corne42, LayoutId::Lily58, LayoutId::Custom];
 
     pub fn name(self) -> &'static str {
         match self {
             LayoutId::QwertyUs => "QWERTY (US)",
             LayoutId::Corne36 => "Corne 3x5+3",
+            LayoutId::Corne42 => "Corne 3x6+3",
+            LayoutId::Lily58 => "Lily58",
+            LayoutId::Custom => "My ZMK keymap",
         }
     }
 
@@ -31,6 +39,9 @@ impl LayoutId {
         match self {
             LayoutId::QwertyUs => "qwerty_us",
             LayoutId::Corne36 => "corne_3x5_3",
+            LayoutId::Corne42 => "corne_3x6_3",
+            LayoutId::Lily58 => "lily58",
+            LayoutId::Custom => "custom",
         }
     }
 
@@ -38,6 +49,14 @@ impl LayoutId {
         match self {
             LayoutId::QwertyUs => qwerty(&KbdGrid::qwerty_us()),
             LayoutId::Corne36 => corne36(),
+            LayoutId::Corne42 => corne42(),
+            LayoutId::Lily58 => lily58(),
+            // Without an imported keymap, the Corne.
+            LayoutId::Custom => CUSTOM_KEYMAP
+                .read()
+                .ok()
+                .and_then(|k| k.as_ref().and_then(|text| custom_from_zmk(text).ok()))
+                .unwrap_or_else(corne36),
         }
     }
 }
@@ -842,6 +861,86 @@ const CORNE_5COL_KEYMAP: [&str; 3] = [
                          &kp LGUI  &kp ESC   &kp SPACE     AS(RET)   &trans    &kp TAB",
 ];
 
+/// The default keymap of ZMK for the Corne with six columns, `app/boards/shields/corne/corne.keymap`.
+const CORNE_6COL_KEYMAP: [&str; 3] = [
+    "&kp TAB   &kp Q &kp W &kp E &kp R &kp T   &kp Y &kp U  &kp I     &kp O   &kp P    &kp BSPC
+     &kp LCTRL &kp A &kp S &kp D &kp F &kp G   &kp H &kp J  &kp K     &kp L   &kp SEMI &kp SQT
+     &kp LSHFT &kp Z &kp X &kp C &kp V &kp B   &kp N &kp M  &kp COMMA &kp DOT &kp FSLH &kp ESC
+                    &kp LGUI &mo 1 &kp SPACE   &kp RET &mo 2 &kp RALT",
+    "&kp TAB    &kp N1       &kp N2       &kp N3       &kp N4       &kp N5         &kp N6   &kp N7   &kp N8 &kp N9    &kp N0 &kp BSPC
+     &bt BT_CLR &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2 &bt BT_SEL 3 &bt BT_SEL 4   &kp LEFT &kp DOWN &kp UP &kp RIGHT &trans &trans
+     &kp LSHFT  &trans       &trans       &trans       &trans       &trans         &trans   &trans   &trans &trans    &trans &trans
+                             &kp LGUI     &trans       &kp SPACE      &kp RET  &trans   &kp RALT",
+    "&kp TAB   &kp EXCL &kp AT &kp HASH &kp DLLR &kp PRCNT   &kp CARET &kp AMPS  &kp ASTRK &kp LPAR &kp RPAR &kp BSPC
+     &kp LCTRL &trans   &trans &trans   &trans   &trans      &kp MINUS &kp EQUAL &kp LBKT  &kp RBKT &kp BSLH &kp GRAVE
+     &kp LSHFT &trans   &trans &trans   &trans   &trans      &kp UNDER &kp PLUS  &kp LBRC  &kp RBRC &kp PIPE &kp TILDE
+                        &kp LGUI &trans   &kp SPACE   &kp RET   &trans    &kp RALT",
+];
+
+/// `foostan_corne_6col_layout` of ZMK (`app/dts/layouts/foostan/corne/6column.dtsi`).
+#[rustfmt::skip]
+const CORNE_6COL_PHYSICAL: [(i32, i32, i32, i32, i32, i32, i32); 42] = [
+    (0, 37, 100, 100, 0, 0, 0), (100, 37, 100, 100, 0, 0, 0), (200, 12, 100, 100, 0, 0, 0),
+    (300, 0, 100, 100, 0, 0, 0), (400, 12, 100, 100, 0, 0, 0), (500, 24, 100, 100, 0, 0, 0),
+    (800, 24, 100, 100, 0, 0, 0), (900, 12, 100, 100, 0, 0, 0), (1000, 0, 100, 100, 0, 0, 0),
+    (1100, 12, 100, 100, 0, 0, 0), (1200, 37, 100, 100, 0, 0, 0), (1300, 37, 100, 100, 0, 0, 0),
+    (0, 137, 100, 100, 0, 0, 0), (100, 137, 100, 100, 0, 0, 0), (200, 112, 100, 100, 0, 0, 0),
+    (300, 100, 100, 100, 0, 0, 0), (400, 112, 100, 100, 0, 0, 0), (500, 124, 100, 100, 0, 0, 0),
+    (800, 124, 100, 100, 0, 0, 0), (900, 112, 100, 100, 0, 0, 0), (1000, 100, 100, 100, 0, 0, 0),
+    (1100, 112, 100, 100, 0, 0, 0), (1200, 137, 100, 100, 0, 0, 0), (1300, 137, 100, 100, 0, 0, 0),
+    (0, 237, 100, 100, 0, 0, 0), (100, 237, 100, 100, 0, 0, 0), (200, 212, 100, 100, 0, 0, 0),
+    (300, 200, 100, 100, 0, 0, 0), (400, 212, 100, 100, 0, 0, 0), (500, 224, 100, 100, 0, 0, 0),
+    (800, 224, 100, 100, 0, 0, 0), (900, 212, 100, 100, 0, 0, 0), (1000, 200, 100, 100, 0, 0, 0),
+    (1100, 212, 100, 100, 0, 0, 0), (1200, 237, 100, 100, 0, 0, 0), (1300, 237, 100, 100, 0, 0, 0),
+    (350, 312, 100, 100, 0, 0, 0), (450, 312, 100, 100, 1200, 450, 412),
+    (548, 283, 100, 150, 2400, 548, 433), (752, 283, 100, 150, -2400, 852, 433),
+    (850, 312, 100, 100, -1200, 950, 412), (950, 312, 100, 100, 0, 0, 0),
+];
+
+/// The default keymap of ZMK for the Lily58, `app/boards/shields/lily58/lily58.keymap`.
+const LILY58_KEYMAP: [&str; 3] = [
+    "&kp ESC   &kp N1 &kp N2 &kp N3   &kp N4   &kp N5                     &kp N6 &kp N7   &kp N8    &kp N9  &kp N0   &kp GRAVE
+     &kp TAB   &kp Q  &kp W  &kp E    &kp R    &kp T                      &kp Y  &kp U    &kp I     &kp O   &kp P    &kp MINUS
+     &kp LCTRL &kp A  &kp S  &kp D    &kp F    &kp G                      &kp H  &kp J    &kp K     &kp L   &kp SEMI &kp SQT
+     &kp LSHFT &kp Z  &kp X  &kp C    &kp V    &kp B  &kp LBKT   &kp RBKT &kp N  &kp M    &kp COMMA &kp DOT &kp FSLH &kp RSHFT
+                             &kp LALT &kp LGUI &mo 1  &kp SPACE  &kp RET  &mo 2  &kp BSPC &kp RGUI",
+    "&bt BT_CLR &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2 &bt BT_SEL 3 &bt BT_SEL 4    &trans &trans &trans &trans &trans &trans
+     &kp F1     &kp F2       &kp F3       &kp F4       &kp F5       &kp F6          &kp F7 &kp F8 &kp F9 &kp F10 &kp F11 &kp F12
+     &kp GRAVE  &kp EXCL     &kp AT       &kp HASH     &kp DOLLAR   &kp PRCNT       &kp CARET &kp AMPS &kp ASTRK &kp LPAR &kp RPAR &kp TILDE
+     &trans     &ext_power EP_ON &ext_power EP_OFF &ext_power EP_TOG &trans &trans &trans &trans  &trans &kp MINUS &kp PLUS &kp LBRC &kp RBRC &kp PIPE
+                             &trans &trans &trans &trans   &trans &trans &trans &trans",
+    "&trans    &trans &trans &trans  &trans  &trans                 &trans      &trans    &trans    &trans   &trans    &trans
+     &kp GRAVE &kp N1 &kp N2 &kp N3  &kp N4  &kp N5                 &kp N6      &kp N7    &kp N8    &kp N9   &kp N0    &trans
+     &kp F1    &kp F2 &kp F3 &kp F4  &kp F5  &kp F6                 &trans      &kp LEFT  &kp DOWN  &kp UP   &kp RIGHT &trans
+     &kp F7    &kp F8 &kp F9 &kp F10 &kp F11 &kp F12 &trans &trans  &kp KP_PLUS &kp MINUS &kp EQUAL &kp LBKT &kp RBKT  &kp BSLH
+                             &trans &trans &trans &trans   &trans &trans &trans &trans",
+];
+
+/// `kata0510_lily58_layout` of ZMK (`app/dts/layouts/kata0510/lily58.dtsi`).
+#[rustfmt::skip]
+const LILY58_PHYSICAL: [(i32, i32, i32, i32, i32, i32, i32); 58] = [
+    (0, 50, 100, 100, 0, 0, 0), (100, 37, 100, 100, 0, 0, 0), (200, 12, 100, 100, 0, 0, 0),
+    (300, 0, 100, 100, 0, 0, 0), (400, 12, 100, 100, 0, 0, 0), (500, 25, 100, 100, 0, 0, 0),
+    (1050, 25, 100, 100, 0, 0, 0), (1150, 12, 100, 100, 0, 0, 0), (1250, 0, 100, 100, 0, 0, 0),
+    (1350, 12, 100, 100, 0, 0, 0), (1450, 37, 100, 100, 0, 0, 0), (1550, 50, 100, 100, 0, 0, 0),
+    (0, 150, 100, 100, 0, 0, 0), (100, 137, 100, 100, 0, 0, 0), (200, 112, 100, 100, 0, 0, 0),
+    (300, 100, 100, 100, 0, 0, 0), (400, 112, 100, 100, 0, 0, 0), (500, 125, 100, 100, 0, 0, 0),
+    (1050, 125, 100, 100, 0, 0, 0), (1150, 112, 100, 100, 0, 0, 0), (1250, 100, 100, 100, 0, 0, 0),
+    (1350, 112, 100, 100, 0, 0, 0), (1450, 137, 100, 100, 0, 0, 0), (1550, 150, 100, 100, 0, 0, 0),
+    (0, 250, 100, 100, 0, 0, 0), (100, 237, 100, 100, 0, 0, 0), (200, 212, 100, 100, 0, 0, 0),
+    (300, 200, 100, 100, 0, 0, 0), (400, 212, 100, 100, 0, 0, 0), (500, 225, 100, 100, 0, 0, 0),
+    (1050, 225, 100, 100, 0, 0, 0), (1150, 212, 100, 100, 0, 0, 0), (1250, 200, 100, 100, 0, 0, 0),
+    (1350, 212, 100, 100, 0, 0, 0), (1450, 237, 100, 100, 0, 0, 0), (1550, 250, 100, 100, 0, 0, 0),
+    (0, 350, 100, 100, 0, 0, 0), (100, 337, 100, 100, 0, 0, 0), (200, 312, 100, 100, 0, 0, 0),
+    (300, 300, 100, 100, 0, 0, 0), (400, 312, 100, 100, 0, 0, 0), (500, 325, 100, 100, 0, 0, 0),
+    (600, 275, 100, 100, 0, 0, 0), (950, 275, 100, 100, 0, 0, 0), (1050, 325, 100, 100, 0, 0, 0),
+    (1150, 312, 100, 100, 0, 0, 0), (1250, 300, 100, 100, 0, 0, 0), (1350, 312, 100, 100, 0, 0, 0),
+    (1450, 337, 100, 100, 0, 0, 0), (1550, 350, 100, 100, 0, 0, 0),
+    (250, 412, 100, 100, 0, 0, 0), (350, 415, 100, 100, 0, 0, 0), (450, 425, 100, 100, 0, 0, 0),
+    (575, 400, 100, 150, 3000, 625, 475), (975, 400, 100, 150, -3000, 1025, 475),
+    (1100, 425, 100, 100, 0, 0, 0), (1200, 415, 100, 100, 0, 0, 0), (1300, 415, 100, 100, 0, 0, 0),
+];
+
 /// `foostan_corne_5col_layout` of ZMK (`app/dts/layouts/foostan/corne/5column.dtsi`), in
 /// hundredths of a key: x, y, w, h, rotation in hundredths of a degree, rotation point.
 #[rustfmt::skip]
@@ -865,44 +964,151 @@ const CORNE_5COL_PHYSICAL: [(i32, i32, i32, i32, i32, i32, i32); 36] = [
 pub fn corne36() -> Layout {
     let layers: Vec<Vec<crate::zmk::Binding>> =
         CORNE_5COL_KEYMAP.iter().map(|layer| crate::zmk::parse_bindings(layer)).collect();
-    // From the outer to the inner column of a half.
-    const LEFT_FINGERS: [u8; 5] = [1, 2, 3, 4, 4];
-    const ROWS: [Row; 3] = [Row::Top, Row::Home, Row::Bottom];
-    let keys: Vec<KeySpec> = CORNE_5COL_PHYSICAL
+    split_from_zmk(LayoutId::Corne36, &layers, &CORNE_5COL_PHYSICAL, vec!["Base", "Lower", "Raise"], true)
+}
+
+/// The Corne with six columns, the default keymap of ZMK (`corne.keymap`).
+pub fn corne42() -> Layout {
+    let layers: Vec<Vec<crate::zmk::Binding>> =
+        CORNE_6COL_KEYMAP.iter().map(|layer| crate::zmk::parse_bindings_with(layer, true)).collect();
+    split_from_zmk(LayoutId::Corne42, &layers, &CORNE_6COL_PHYSICAL, vec!["Base", "Lower", "Raise"], false)
+}
+
+/// The Lily58, the default keymap of ZMK (`lily58.keymap`).
+pub fn lily58() -> Layout {
+    let layers: Vec<Vec<crate::zmk::Binding>> =
+        LILY58_KEYMAP.iter().map(|layer| crate::zmk::parse_bindings_with(layer, true)).collect();
+    split_from_zmk(LayoutId::Lily58, &layers, &LILY58_PHYSICAL, vec!["Base", "Lower", "Raise"], false)
+}
+
+static CUSTOM_KEYMAP: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// The `.keymap` file of ZMK of the custom layout, see [`LayoutId::Custom`].
+pub fn set_custom_keymap(text: Option<String>) {
+    if let Ok(mut keymap) = CUSTOM_KEYMAP.write() {
+        *keymap = text;
+    }
+}
+
+/// A keymap of ZMK imported by the user: its physical layout is the one with as many keys,
+/// a Corne with 5 or 6 columns or a Lily58.
+pub fn custom_from_zmk(text: &str) -> Result<Layout, String> {
+    let parsed = crate::zmk::parse_keymap(text);
+    let Some(first) = parsed.first() else {
+        return Err("no layer with bindings in the keymap".into());
+    };
+    let n = first.1.len();
+    let physical: &[(i32, i32, i32, i32, i32, i32, i32)] = match n {
+        36 => &CORNE_5COL_PHYSICAL,
+        42 => &CORNE_6COL_PHYSICAL,
+        58 => &LILY58_PHYSICAL,
+        n => return Err(format!("{n} keys: only the Corne (36 or 42 keys) and the Lily58 (58) are known")),
+    };
+    let auto_shift = text.contains("AS(") || text.contains("auto-shift") || text.contains("&as ");
+    let names: Vec<&'static str> = parsed
         .iter()
         .enumerate()
-        .map(|(i, &(x, y, w, h, rot, rx, ry))| {
-            let (row, left, finger) = if i < 30 {
-                let column = i % 10;
-                let left = column < 5;
-                let finger = if left { LEFT_FINGERS[column] } else { 10 - LEFT_FINGERS[9 - column] };
-                (ROWS[i / 10], left, finger)
+        .map(|(i, (name, _))| {
+            let name = if i == 0 { "Base".to_string() } else { name.replace("_layer", "").replace(" Layer", "") };
+            &*Box::leak(capitalize(&name).into_boxed_str())
+        })
+        .collect();
+    let layers: Vec<Vec<crate::zmk::Binding>> = parsed.into_iter().map(|(_, b)| b).collect();
+    Ok(split_from_zmk(LayoutId::Custom, &layers, physical, names, auto_shift))
+}
+
+/// A column staggered split keyboard of ZMK, its keys in the order of the keymap with their
+/// physical attributes in hundredths of a key (x, y, w, h, rotation in hundredths of a degree,
+/// rotation point). The fingers and the rows come from the places: the rotated keys and the
+/// keys under the outer column are thumbs, the two inner columns are the index fingers, then
+/// the middle, the ring and the pinky for the outer columns.
+pub fn split_from_zmk(
+    id: LayoutId,
+    layers: &[Vec<crate::zmk::Binding>],
+    physical: &[(i32, i32, i32, i32, i32, i32, i32)],
+    layer_names: Vec<&'static str>,
+    auto_shift: bool,
+) -> Layout {
+    let min_x = physical.iter().map(|p| p.0).min().unwrap_or(0);
+    let max_x = physical.iter().map(|p| p.0 + p.2).max().unwrap_or(0);
+    let middle = (min_x + max_x) / 2;
+    // The lowest key of the outer column, the thumbs are below.
+    let outer_bottom = physical.iter().filter(|p| p.0 == min_x).map(|p| p.1).max().unwrap_or(0);
+    let is_thumb = |p: &(i32, i32, i32, i32, i32, i32, i32)| p.4 != 0 || p.1 > outer_bottom + 50;
+    let left_of = |p: &(i32, i32, i32, i32, i32, i32, i32)| p.0 + p.2 / 2 < middle;
+    // The columns of each half, from the outer one: a lone key is not a column, as the inner
+    // keys of the Lily58.
+    let in_column = |x: i32| physical.iter().filter(|q| q.0 == x && !is_thumb(q)).count() >= 2;
+    let columns = |left: bool| {
+        let mut xs: Vec<i32> =
+            physical.iter().filter(|p| !is_thumb(p) && left_of(p) == left && in_column(p.0)).map(|p| p.0).collect();
+        xs.sort_unstable();
+        xs.dedup();
+        if !left {
+            xs.reverse();
+        }
+        xs
+    };
+    let (left_columns, right_columns) = (columns(true), columns(false));
+    let keys: Vec<KeySpec> = physical
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let &(x, y, w, h, rot, rx, ry) = p;
+            let left = left_of(p);
+            let (row, finger) = if is_thumb(p) {
+                (Row::Thumb, 5)
             } else {
-                (Row::Thumb, i < 33, 5)
+                let cols = if left { &left_columns } else { &right_columns };
+                // A lone key beside the columns: inside, the index finger, outside, the pinky.
+                let inner = cols.last().copied().unwrap_or(x);
+                let column = cols.iter().position(|c| *c == x).unwrap_or_else(|| {
+                    let inside = if left { x > inner } else { x < inner };
+                    if inside { cols.len().saturating_sub(1) } else { 0 }
+                });
+                let from_inner = cols.len().saturating_sub(1 + column);
+                let finger = match from_inner {
+                    0 | 1 => 4,
+                    2 => 3,
+                    3 => 2,
+                    _ => 1,
+                };
+                // The rows of the column, from the top.
+                let mut ys: Vec<i32> = physical.iter().filter(|q| q.0 == x && !is_thumb(q)).map(|q| q.1).collect();
+                ys.sort_unstable();
+                let index = ys.iter().position(|v| *v == y).unwrap_or(0);
+                let names: &[Row] = match ys.len() {
+                    // A lone key, beside the rows.
+                    1 => &[Row::Other],
+                    2 => &[Row::Home, Row::Bottom],
+                    3 => &[Row::Top, Row::Home, Row::Bottom],
+                    _ => &[Row::Number, Row::Top, Row::Home, Row::Bottom],
+                };
+                (names[index.min(names.len() - 1)], if left { finger } else { 10 - finger })
             };
             let units = |v: i32| v as f32 / 100.0;
             let pos = KeyPos {
-                x: units(x),
+                x: units(x - min_x),
                 y: units(y),
                 w: units(w),
                 h: units(h),
                 rot: rot as f32 / 100.0,
-                rx: units(rx),
+                rx: if rot == 0 { 0.0 } else { units(rx - min_x) },
                 ry: units(ry),
             };
-            crate::zmk::key_spec(&layers, i, finger, row, left, pos)
+            crate::zmk::key_spec(layers, i, finger, row, left, pos)
         })
         .collect();
     let left: Vec<usize> = (0..keys.len()).filter(|k| keys[*k].left).collect();
     let right: Vec<usize> = (0..keys.len()).filter(|k| !keys[*k].left).collect();
     Layout {
-        id: LayoutId::Corne36,
+        id,
         keys,
         blocks: vec![Block { keys: left }, Block { keys: right }],
-        layer_names: vec!["Base", "Lower", "Raise"],
-        unit: 52.0,
+        layer_names,
+        unit: if physical.len() > 42 { 44.0 } else { 52.0 },
         split: true,
-        auto_shift: true,
+        auto_shift,
     }
 }
 
@@ -1077,5 +1283,54 @@ mod klavaro_grid_tests {
         }
         // QWERTY keeps the lessons of Klavaro.
         assert_eq!(lesson_char_set(4, &LayoutId::QwertyUs.build().klavaro_grid()), vec!['a', ';']);
+    }
+}
+
+#[cfg(test)]
+mod zmk_layout_tests {
+    use super::*;
+
+    fn char_key<'a>(layout: &'a Layout, c: char) -> &'a KeySpec {
+        let at = layout.locate(c).unwrap_or_else(|| panic!("{c}"));
+        assert_eq!(at.layer, 0, "{c} on the base layer");
+        &layout.keys[at.key]
+    }
+
+    #[test]
+    fn fingers_and_rows_from_the_places() {
+        for layout in [corne36(), corne42(), lily58()] {
+            for (c, finger, row) in [
+                ('a', 1, Row::Home),
+                ('s', 2, Row::Home),
+                ('d', 3, Row::Home),
+                ('f', 4, Row::Home),
+                ('g', 4, Row::Home),
+                ('j', 6, Row::Home),
+                ('l', 8, Row::Home),
+                ('q', 1, Row::Top),
+                ('b', 4, Row::Bottom),
+                ('p', 9, Row::Top),
+            ] {
+                let key = char_key(&layout, c);
+                assert_eq!((key.finger, key.row), (finger, row), "{c} on {:?}", layout.id);
+            }
+            assert!(layout.keys.iter().filter(|k| k.row == Row::Thumb).count() >= 6, "{:?}", layout.id);
+        }
+        // The number row of the Lily58, Shift for the capitals.
+        let lily = lily58();
+        assert_eq!(char_key(&lily, '1').row, Row::Number);
+        assert!(!lily.auto_shift);
+        assert!(lily.plan(Target::Char('A')).is_some_and(|p| p.shift));
+        assert!(lily.plan(Target::Char('!')).is_some());
+    }
+
+    #[test]
+    fn imported_keymap() {
+        let text = include_str!("../tests/data/corne.keymap");
+        let layout = custom_from_zmk(text).expect("the keymap");
+        assert_eq!(layout.keys.len(), 42);
+        assert_eq!(layout.layer_names, vec!["Base", "Lower", "Raise"]);
+        assert!(layout.plan(Target::Char('{')).is_some_and(|p| p.layer == 2));
+        assert!(custom_from_zmk("/ { keymap { }; };").is_err());
     }
 }

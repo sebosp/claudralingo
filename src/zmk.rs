@@ -36,10 +36,10 @@ fn code(name: &str) -> Option<Code> {
         "BSLH" | "BACKSLASH" => '\\',
         "GRAVE" => '`',
         "TILDE" => '~',
-        "MINUS" => '-',
+        "MINUS" | "KP_MINUS" => '-',
         "UNDER" | "UNDERSCORE" => '_',
         "EQUAL" => '=',
-        "PLUS" => '+',
+        "PLUS" | "KP_PLUS" => '+',
         "LBKT" | "LEFT_BRACKET" => '[',
         "RBKT" | "RIGHT_BRACKET" => ']',
         "LBRC" | "LEFT_BRACE" => '{',
@@ -113,6 +113,11 @@ fn binding(code: Option<Code>, auto_shift: bool) -> Binding {
 
 /// The bindings of a layer, in the order of the keys.
 pub fn parse_bindings(layer: &str) -> Vec<Binding> {
+    parse_bindings_with(layer, false)
+}
+
+/// With `kp_shifts`, a keyboard with Shift keys: `&kp N1` types `!` with Shift.
+pub fn parse_bindings_with(layer: &str, kp_shifts: bool) -> Vec<Binding> {
     let mut tokens = layer.split_whitespace();
     let mut bindings = Vec::new();
     while let Some(token) = tokens.next() {
@@ -120,12 +125,17 @@ pub fn parse_bindings(layer: &str) -> Vec<Binding> {
             binding(code(inner), true)
         } else {
             match token {
-                "&kp" => binding(tokens.next().and_then(code), false),
+                "&kp" => binding(tokens.next().and_then(code), kp_shifts),
                 "&mo" => tokens
                     .next()
                     .and_then(|n| n.parse().ok())
                     .map_or(Binding::None, |n| Binding::Special(Special::Layer(n))),
                 "&trans" => Binding::Trans,
+                // The behaviors with a parameter, as the power of the lights.
+                "&ext_power" | "&rgb_ug" | "&bl" | "&out" => {
+                    tokens.next();
+                    Binding::None
+                }
                 "&bt" => match tokens.next() {
                     Some("BT_SEL") => tokens
                         .next()
@@ -170,6 +180,57 @@ pub fn key_spec(layers: &[Vec<Binding>], index: usize, finger: u8, row: Row, lef
         left,
         pos,
     }
+}
+
+/// The layers of a `.keymap` file of ZMK: the `bindings` of its layers in order, and their
+/// names, `display-name` or the name of the node.
+pub fn parse_keymap(text: &str) -> Vec<(String, Vec<Binding>)> {
+    // Without the comments.
+    let mut clean = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
+        } else if rest.starts_with("//") {
+            rest = rest.find('\n').map_or("", |end| &rest[end..]);
+        } else {
+            let c = rest.chars().next().unwrap_or(' ');
+            clean.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    let kp_shifts = !clean.contains("AS(");
+    let mut layers = Vec::new();
+    let mut search = 0;
+    while let Some(found) = clean[search..].find("bindings") {
+        let at = search + found;
+        search = at + "bindings".len();
+        // A property `bindings = <...>`, not the sensor bindings nor `dt-bindings`.
+        let before = clean[..at].chars().next_back();
+        let is_property = before.is_none_or(char::is_whitespace) && clean[search..].trim_start().starts_with('=');
+        if !is_property {
+            continue;
+        }
+        let Some(open) = clean[at..].find('<').map(|o| at + o + 1) else {
+            break;
+        };
+        let Some(close) = clean[open..].find('>').map(|c| open + c) else {
+            break;
+        };
+        // The name: the display-name of the node, else the node.
+        let node_start = clean[..at].rfind('{').unwrap_or(0);
+        let header = &clean[..node_start];
+        let node = header.split_whitespace().last().unwrap_or("layer").to_string();
+        let body = &clean[node_start..at];
+        let name = body
+            .find("display-name")
+            .and_then(|d| body[d..].split('"').nth(1))
+            .map(str::to_string)
+            .unwrap_or(node);
+        layers.push((name, parse_bindings_with(&clean[open..close], kp_shifts)));
+        search = close;
+    }
+    layers
 }
 
 #[cfg(test)]

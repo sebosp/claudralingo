@@ -70,6 +70,9 @@ struct AccuracyText;
 #[derive(Component, Default, Clone)]
 struct ModeSelect;
 
+#[derive(Component, Default, Clone)]
+struct LayoutSelect;
+
 /// The toggles and checkboxes of the settings, they start unchecked.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Setting {
@@ -93,6 +96,14 @@ struct SuggestButton;
 
 #[derive(Component, Default, Clone)]
 struct ZoomLabel;
+
+/// The result of the last keymap import.
+#[derive(Component, Default, Clone)]
+struct KeymapStatus;
+
+/// A paste of a keymap waiting for the clipboard.
+#[derive(Resource, Default)]
+struct PendingKeymap(Option<bevy::clipboard::ClipboardRead>);
 
 /// The views of the keyboard modes, hidden in the hanzi mode.
 #[derive(Component, Default, Clone)]
@@ -174,7 +185,8 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Panel>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
+        app.init_resource::<Panel>()
+            .init_resource::<PendingKeymap>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
             Update,
             (
                 init_settings,
@@ -188,6 +200,7 @@ impl Plugin for UiPlugin {
                 fill_lessons.run_if(resource_changed::<Panel>),
                 show_hands,
                 show_hanzi,
+                import_keymap,
                 update_rankings.run_if(resource_changed::<Progress>),
                 update_zoom_label.run_if(resource_changed::<UiScale>),
             )
@@ -467,7 +480,22 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         Node {
                             min_width: px(180),
                         }
+                        LayoutSelect
                         on(on_layout_change)
+                    ]
+                    --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(12),
+                    }
+                    Children [
+                        @FeathersButton {
+                            @caption: bsn! { @caption("Paste ZMK keymap") }
+                        }
+                        on(paste_keymap)
+                        --
+                        @label_dim("Copy your .keymap file, or drop it on the window") KeymapStatus
                     ]
                     --
                     Node {
@@ -976,6 +1004,7 @@ fn on_mode_change(
 fn sync_mode_select(
     progress: Res<Progress>,
     selects: Query<Entity, With<ModeSelect>>,
+    layout_selects: Query<Entity, With<LayoutSelect>>,
     children: Query<&Children>,
     rows: Query<(&OptionIndex, Has<Selected>)>,
     mut commands: Commands,
@@ -983,8 +1012,10 @@ fn sync_mode_select(
     if !progress.is_changed() {
         return;
     }
-    let index = ExerciseMode::ALL.iter().position(|m| *m == progress.mode);
-    for select in &selects {
+    let mode = ExerciseMode::ALL.iter().position(|m| *m == progress.mode);
+    let layout = LayoutId::ALL.iter().position(|l| *l == progress.layout);
+    let selects = selects.iter().map(|s| (s, mode)).chain(layout_selects.iter().map(|s| (s, layout)));
+    for (select, index) in selects {
         for row in children.iter_descendants(select) {
             if let Ok((option, selected)) = rows.get(row) {
                 let wanted = Some(option.0) == index;
@@ -995,6 +1026,62 @@ fn sync_mode_select(
                 }
             }
         }
+    }
+}
+
+fn paste_keymap(
+    _: On<Activate>,
+    mut clipboard: ResMut<bevy::clipboard::Clipboard>,
+    mut pending: ResMut<PendingKeymap>,
+    mut focus: ResMut<InputFocus>,
+) {
+    pending.0 = Some(clipboard.fetch_text());
+    release_focus(&mut focus);
+}
+
+/// A keymap of ZMK pasted or dropped on the window becomes the layout "My ZMK keymap".
+fn import_keymap(
+    mut pending: ResMut<PendingKeymap>,
+    mut drops: MessageReader<FileDragAndDrop>,
+    mut progress: ResMut<Progress>,
+    mut layout: ResMut<ActiveLayout>,
+    mut status: Query<&mut Text, With<KeymapStatus>>,
+    mut new_exercise: MessageWriter<NewExercise>,
+) {
+    let mut text: Option<Result<String, String>> = None;
+    if let Some(read) = pending.0.as_mut()
+        && let Some(result) = read.poll_result()
+    {
+        pending.0 = None;
+        text = Some(result.map_err(|err| format!("could not read the clipboard: {err:?}")));
+    }
+    for drop in drops.read() {
+        if let FileDragAndDrop::DroppedFile { path_buf, .. } = drop {
+            text = Some(std::fs::read_to_string(path_buf).map_err(|err| format!("{}: {err}", path_buf.display())));
+        }
+    }
+    let Some(text) = text else {
+        return;
+    };
+    let message = match text.and_then(|t| crate::layout::custom_from_zmk(&t).map(|l| (t, l))) {
+        Ok((keymap, custom)) => {
+            let message = format!(
+                "Imported: {} keys, layers {}",
+                custom.keys.len(),
+                custom.layer_names.join(", ")
+            );
+            crate::layout::set_custom_keymap(Some(keymap.clone()));
+            progress.custom_keymap = Some(keymap);
+            progress.layout = LayoutId::Custom;
+            progress.save();
+            layout.0 = custom;
+            new_exercise.write_default();
+            message
+        }
+        Err(err) => format!("Not imported: {err}"),
+    };
+    for mut label in &mut status {
+        label.0 = message.clone();
     }
 }
 

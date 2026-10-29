@@ -234,6 +234,8 @@ pub struct Progress {
     /// The words of the hanzi mode are spoken.
     pub sound: bool,
     pub hanzi: HanziProgress,
+    /// The `.keymap` file of ZMK imported, the layout "My ZMK keymap".
+    pub custom_keymap: Option<String>,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -278,6 +280,7 @@ impl Default for Progress {
             pinyin_keypad: false,
             sound: true,
             hanzi: HanziProgress::default(),
+            custom_keymap: None,
             layouts: BTreeMap::new(),
         }
     }
@@ -301,6 +304,7 @@ impl Progress {
         for layout in progress.layouts.values_mut() {
             layout.klavaro.sanitize();
         }
+        crate::layout::set_custom_keymap(progress.custom_keymap.clone());
         progress
     }
 
