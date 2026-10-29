@@ -1290,7 +1290,7 @@ mod klavaro_grid_tests {
 mod zmk_layout_tests {
     use super::*;
 
-    fn char_key<'a>(layout: &'a Layout, c: char) -> &'a KeySpec {
+    fn char_key(layout: &Layout, c: char) -> &KeySpec {
         let at = layout.locate(c).unwrap_or_else(|| panic!("{c}"));
         assert_eq!(at.layer, 0, "{c} on the base layer");
         &layout.keys[at.key]
