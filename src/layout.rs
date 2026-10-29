@@ -579,6 +579,47 @@ impl Layout {
             && plan.mods.len() == held
     }
 
+    /// The keyboard grid of Klavaro for this layout: its lessons, made for a QWERTY keyboard,
+    /// pick the keys by their place. The letter keys of a split keyboard take the places of the
+    /// QWERTY keys under the same finger, so a lesson trains the keys of the base layer first:
+    /// the home row pinky of the Corne is `'`, not `;`. The places the layout does not have, the
+    /// number row and the outer columns, keep their QWERTY characters, typed on the layers in
+    /// the later lessons.
+    pub fn klavaro_grid(&self) -> KbdGrid {
+        let mut grid = KbdGrid::qwerty_us();
+        if !self.split {
+            return grid;
+        }
+        // The QWERTY columns of the innermost five keys of each hand, by row: the number row
+        // starts at `1`, the bottom row at `z`.
+        let rows = [(Row::Number, 0, 1), (Row::Top, 1, 0), (Row::Home, 2, 0), (Row::Bottom, 3, 1)];
+        for (row, i, offset) in rows {
+            for left in [true, false] {
+                let mut keys: Vec<&KeySpec> = self.keys.iter().filter(|k| k.row == row && k.left == left).collect();
+                keys.sort_by(|a, b| a.pos.x.total_cmp(&b.pos.x));
+                let inner: Vec<&KeySpec> = if left {
+                    keys.iter().rev().take(5).rev().copied().collect()
+                } else {
+                    keys.into_iter().take(5).collect()
+                };
+                let start = if left { offset + 5 - inner.len() } else { offset + 5 };
+                for (n, key) in inner.into_iter().enumerate() {
+                    // A modifier there, Ctrl in the place of `,` on the Corne: nothing to type.
+                    let out = key.outputs.first().copied().flatten().unwrap_or(Output { lo: ' ', up: ' ' });
+                    grid.lochars[i][start + n] = out.lo;
+                    grid.upchars[i][start + n] = out.up;
+                }
+            }
+        }
+        // The QWERTY characters replaced, `;` and `,` on the Corne, are typed on its layers.
+        for c in KbdGrid::qwerty_us().chars_typed() {
+            if !grid.is_inset(c) && self.locate(c).is_some() {
+                grid.extra.push(c);
+            }
+        }
+        grid
+    }
+
     /// How to press a plan, for the layer trainer.
     pub fn describe(&self, plan: &Plan) -> String {
         let names = &self.layer_names;
@@ -1006,5 +1047,35 @@ mod tests {
 
     fn chord_name() -> String {
         Chord::new(Mods::CTRL_SHIFT, KeyName::Special(Special::Right)).name()
+    }
+}
+
+#[cfg(test)]
+mod klavaro_grid_tests {
+    use super::*;
+    use crate::klavaro::basic::{draw_lesson, lesson_char_set};
+
+    #[test]
+    fn corne_lessons_use_the_base_layer_first() {
+        let grid = corne36().klavaro_grid();
+        let set = |lesson| lesson_char_set(lesson, &grid).into_iter().collect::<String>();
+        // The home row pinky of the Corne types `'`, `;` is on Raise.
+        assert_eq!(set(4), "a'");
+        assert_eq!(set(10), "asdfghjkl'");
+        // Ctrl and Alt sit where `,` and `.` are on QWERTY, `.` where `/` is: the home keys of
+        // the fingers complete the lessons.
+        assert_eq!(set(22), "cdk");
+        assert_eq!(set(23), "xsl");
+        assert_eq!(set(30), "zxcvbnm.");
+        // The number row is on the layers, later.
+        assert_eq!(set(32), "1234");
+        assert!(grid.is_inset(';') && grid.is_inset(','));
+        for lesson in 1..=crate::klavaro::N_BASIC_LESSONS {
+            let chars = lesson_char_set(lesson, &grid);
+            assert!(!chars.is_empty(), "lesson {lesson}");
+            assert!(!draw_lesson(&chars).is_empty());
+        }
+        // QWERTY keeps the lessons of Klavaro.
+        assert_eq!(lesson_char_set(4, &LayoutId::QwertyUs.build().klavaro_grid()), vec!['a', ';']);
     }
 }

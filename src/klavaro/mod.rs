@@ -39,6 +39,8 @@ pub struct KbdGrid {
     pub lochars: [[char; 14]; 4],
     pub upchars: [[char; 14]; 4],
     pub fingers: [[u8; 14]; 4],
+    /// The characters the keyboard types outside of the grid, on the layers of a Corne.
+    pub extra: Vec<char>,
 }
 
 impl KbdGrid {
@@ -47,6 +49,7 @@ impl KbdGrid {
             lochars: [[' '; 14]; 4],
             upchars: [[' '; 14]; 4],
             fingers: [[0; 14]; 4],
+            extra: Vec::new(),
         };
         for (i, line) in kbd.lines().take(12).enumerate() {
             for (j, c) in line.chars().take(14).enumerate() {
@@ -68,9 +71,14 @@ impl KbdGrid {
         (0..4).flat_map(move |i| (0..14).map(move |j| (self.lochars[i][j], self.upchars[i][j])))
     }
 
+    /// The lower and the upper characters of the grid.
+    pub fn chars_typed(&self) -> Vec<char> {
+        self.chars().flat_map(|(lo, up)| [lo, up]).filter(|c| !c.is_whitespace()).collect()
+    }
+
     /// `keyb_is_inset`
     pub fn is_inset(&self, c: char) -> bool {
-        self.chars().any(|(lo, up)| c == lo || c == up)
+        self.chars().any(|(lo, up)| c == lo || c == up) || self.extra.contains(&c)
     }
 
     /// `keyb_get_vowels`

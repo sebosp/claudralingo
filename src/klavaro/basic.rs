@@ -27,6 +27,23 @@ pub fn lesson_char_set(lesson: usize, grid: &KbdGrid) -> Vec<char> {
             }
         }
     }
+    // A keyboard without some of the keys, a modifier where QWERTY has `,` on the Corne: the
+    // home keys of the same fingers come along, a lesson needs two characters.
+    if char_set.len() < 2 {
+        for (i, mask) in lines.iter().take(4).enumerate() {
+            for (j, bit) in mask.chars().take(14).enumerate() {
+                // The bottom and the number rows are shifted by one column.
+                let home = if i == 0 || i == 3 { j.checked_sub(1) } else { Some(j) };
+                if let Some(c) = home.map(|h| grid.lochars[2][h])
+                    && bit == '1'
+                    && is_graph(c)
+                    && !char_set.contains(&c)
+                {
+                    char_set.push(c);
+                }
+            }
+        }
+    }
     char_set
 }
 

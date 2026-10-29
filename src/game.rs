@@ -149,7 +149,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         let mut progress = Progress::load();
         let layout = progress.layout.build();
-        let grid = KbdGrid::qwerty_us();
+        let grid = layout.klavaro_grid();
         let exercise = generate(&grid, &layout, &mut progress);
         let coach = Coach {
             target: None,
@@ -227,12 +227,15 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
 fn new_exercise(
     mut exercise: ResMut<Exercise>,
     mut progress: ResMut<Progress>,
-    grid: Res<Grid>,
+    mut grid: ResMut<Grid>,
     layout: Res<ActiveLayout>,
     mut drill: ResMut<crate::shortcuts::Drill>,
     mut coach: ResMut<Coach>,
     time: Res<Time<Real>>,
 ) {
+    if layout.is_changed() {
+        grid.0 = layout.0.klavaro_grid();
+    }
     *exercise = generate(&grid.0, &layout.0, &mut progress);
     *drill = crate::shortcuts::Drill::new(&layout.0);
     coach.reset(time.elapsed_secs_f64());

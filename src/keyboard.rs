@@ -596,7 +596,9 @@ fn update_hints(
         format!("{} for the next key, click it again to cancel", names.join(" + "))
     } else {
         match &plan {
-            Some(plan) if trainer_applies => layout.describe(plan),
+            // The keys of a layer combination are highlighted already, the words are for the
+            // auto shift and the modifiers.
+            Some(plan) if trainer_applies && plan.layer == 0 => layout.describe(plan),
             _ => String::new(),
         }
     };

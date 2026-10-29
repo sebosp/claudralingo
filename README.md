@@ -86,6 +86,13 @@ everything bigger; the zoom adds to that (50% to 300% in all, saved) with the bu
 mouse wheel, a trackpad pinch, Ctrl+= Ctrl+- Ctrl+0 (in the browser its own zoom does that). The
 wheel scrolls the window when it does not fit.
 
+Basic course on a split keyboard: the lessons of Klavaro pick the keys by their QWERTY place, the
+Corne takes the places of the keys under the same fingers, so the lessons train its base layer
+first (lesson 4 is `a '`, the home row pinky); the number row and the symbols come in the later
+lessons, on the layers. A modifier in a place (Ctrl where QWERTY has `,`) brings the home keys of
+the fingers instead. The layer trainer highlights a layer combination on the keyboard, the words
+above it are for the auto shift and the modifiers.
+
 Lessons (toolbar): the 43 lessons of the basic course with the best and the last accuracy and the
 times typed, green when the best reached 95%, red below; a click practices a lesson again. The
 progress is saved in `~/.config/claudralingo/progress.json` (in the browser, its local storage).
