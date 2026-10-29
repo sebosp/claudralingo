@@ -44,7 +44,25 @@ pub struct Exercise {
     pub message: String,
     /// The finger drill suggested at the end, with the reason.
     pub suggestion: Option<(u8, String)>,
+    /// The most missed characters of a failed exercise, red on the keyboard until the next one.
+    pub review: Vec<char>,
 }
+
+/// The accuracy to pass an exercise, Klavaro's goals: the basic course unlocks the next lesson
+/// at 95%.
+pub fn goal(mode: ExerciseMode) -> f64 {
+    match mode {
+        ExerciseMode::Basic => klavaro::basic::GOAL_ACCURACY,
+        ExerciseMode::Adaptability => 98.0,
+        ExerciseMode::Velocity => 95.0,
+        ExerciseMode::Fluidness => 97.0,
+        ExerciseMode::Fingers | ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::GOAL_ACCURACY,
+        ExerciseMode::Shortcuts => 100.0,
+    }
+}
+
+/// The keys shown in red after a failed exercise.
+const N_REVIEW: usize = 4;
 
 /// What to press next and how much help to show on the keyboard.
 #[derive(Resource)]
@@ -202,6 +220,7 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         misses: BTreeMap::new(),
         message: String::new(),
         suggestion: None,
+        review: Vec::new(),
     }
 }
 
@@ -479,6 +498,18 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         ExerciseMode::Shortcuts => String::new(),
     };
     exercise.suggestion = suggest(exercise, progress, layout);
+    if results.accuracy < goal(mode) {
+        let mut missed: Vec<(char, u32)> = exercise.misses.iter().map(|(c, n)| (*c, *n)).collect();
+        missed.sort_by_key(|m| std::cmp::Reverse(m.1));
+        exercise.review = missed.into_iter().take(N_REVIEW).map(|(c, _)| c).collect();
+        if !exercise.review.is_empty() {
+            let keys: Vec<String> =
+                exercise.review.iter().map(|c| if *c == ' ' { "Space".into() } else { c.to_string() }).collect();
+            exercise.message.push_str(&format!("\nFocus next time: {}, red on the keyboard", keys.join("  ")));
+        }
+    } else if mode == ExerciseMode::Basic && exercise.lesson < N_BASIC_LESSONS {
+        exercise.message.push_str(&format!("\nLesson {} unlocked.", exercise.lesson + 1));
+    }
     let current = progress.current();
     if mode == ExerciseMode::Basic && results.accuracy >= klavaro::basic::GOAL_ACCURACY {
         current.basic_lesson = (exercise.lesson + 1).min(N_BASIC_LESSONS);

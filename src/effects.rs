@@ -34,7 +34,37 @@ struct Spark {
     age: f32,
     life: f32,
     color: Color,
+    /// Pixels per second squared, the sparks of the fireworks fall.
+    gravity: f32,
 }
+
+/// A firework going up, it bursts when its fuse is out.
+#[derive(Component)]
+struct Rocket {
+    position: Vec2,
+    velocity: Vec2,
+    fuse: f32,
+    color: Color,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Celebration {
+    /// A perfect exercise.
+    Fireworks,
+    /// An exercise passed with a few errors.
+    Sparkles,
+}
+
+/// The celebration at the end of an exercise, for a few seconds.
+#[derive(Resource, Default)]
+struct Show {
+    celebration: Option<Celebration>,
+    age: f32,
+    launched: u32,
+}
+
+const FIREWORKS_SECONDS: f32 = 3.0;
+const ROCKETS: u32 = 12;
 
 #[derive(Component)]
 struct FadeIn {
@@ -45,10 +75,13 @@ pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<Show>().add_systems(
             Update,
             (
                 on_touch,
+                start_celebration,
+                celebrate,
+                animate_rockets,
                 fade_in_message,
                 animate_keys,
                 animate_shakes,
@@ -67,6 +100,150 @@ fn center(transform: &UiGlobalTransform, node: &ComputedNode) -> Vec2 {
     transform.affine().translation * node.inverse_scale_factor()
 }
 
+fn spawn_spark(commands: &mut Commands, at: Vec2, velocity: Vec2, size: f32, life: f32, color: Color, gravity: f32) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(at.x),
+            top: px(at.y),
+            width: px(size),
+            height: px(size),
+            border_radius: BorderRadius::all(percent(50)),
+            ..default()
+        },
+        BackgroundColor(color),
+        GlobalZIndex(100),
+        Pickable::IGNORE,
+        Spark { position: at, velocity, age: 0.0, life, color, gravity },
+    ));
+}
+
+/// The fireworks for a perfect exercise, sparkles when passed, nothing when failed: the missed
+/// keys are red on the keyboard then.
+fn start_celebration(
+    exercise: Res<Exercise>,
+    progress: Res<crate::progress::Progress>,
+    mut show: ResMut<Show>,
+    mut was_end: Local<bool>,
+) {
+    let is_end = exercise.tutor.query == TutorQuery::End;
+    if is_end && !*was_end && !progress.reduce_motion
+        && let Some(results) = exercise.tutor.results
+    {
+        let celebration = if results.n_errors == 0 {
+            Some(Celebration::Fireworks)
+        } else if results.accuracy >= crate::game::goal(exercise.mode) {
+            Some(Celebration::Sparkles)
+        } else {
+            None
+        };
+        *show = Show { celebration, age: 0.0, launched: 0 };
+    }
+    *was_end = is_end;
+}
+
+/// The colors of the fingers and the layers, the fireworks wear them all.
+fn festive(theme: &UiTheme) -> Color {
+    let tokens = [
+        &tokens::FINGERS[1],
+        &tokens::FINGERS[2],
+        &tokens::FINGERS[3],
+        &tokens::FINGERS[4],
+        &tokens::FINGERS[5],
+        &tokens::LAYERS[1],
+        &tokens::LAYERS[2],
+        &tokens::CURSOR,
+    ];
+    theme.color(tokens[fastrand::usize(..tokens.len())])
+}
+
+fn celebrate(
+    time: Res<Time>,
+    theme: Res<UiTheme>,
+    window: Single<&Window>,
+    messages: Query<(&UiGlobalTransform, &ComputedNode), With<MessageText>>,
+    mut show: ResMut<Show>,
+    mut commands: Commands,
+) {
+    let Some(celebration) = show.celebration else {
+        return;
+    };
+    show.age += time.delta_secs();
+    let (width, height) = (window.width(), window.height());
+    match celebration {
+        Celebration::Fireworks => {
+            // The rockets go up from the bottom, one after the other.
+            let due = ((show.age / FIREWORKS_SECONDS) * ROCKETS as f32).ceil() as u32;
+            while show.launched < due.min(ROCKETS) {
+                show.launched += 1;
+                let x = width * (0.12 + 0.76 * fastrand::f32());
+                commands.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: px(4),
+                        height: px(4),
+                        border_radius: BorderRadius::all(percent(50)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::WHITE),
+                    GlobalZIndex(100),
+                    Pickable::IGNORE,
+                    Rocket {
+                        position: Vec2::new(x, height),
+                        velocity: Vec2::new((fastrand::f32() - 0.5) * 80.0, -(height * 0.9 + 200.0 * fastrand::f32())),
+                        fuse: 0.55 + 0.35 * fastrand::f32(),
+                        color: festive(&theme),
+                    },
+                ));
+            }
+            if show.age > FIREWORKS_SECONDS {
+                show.celebration = None;
+            }
+        }
+        Celebration::Sparkles => {
+            // One soft burst from the comment, rising, once the comment is laid out: it shows
+            // up with the end of the exercise.
+            let Some(at) = messages
+                .iter()
+                .find(|(_, node)| node.size().x > 0.0)
+                .map(|(transform, node)| center(transform, node))
+            else {
+                return;
+            };
+            for _ in 0..28 {
+                let angle = -TAU / 4.0 + (fastrand::f32() - 0.5) * 2.4;
+                let velocity = Vec2::from_angle(angle) * (90.0 + 140.0 * fastrand::f32());
+                let start = at + Vec2::new((fastrand::f32() - 0.5) * 300.0, 0.0);
+                spawn_spark(&mut commands, start, velocity, 3.0 + 2.0 * fastrand::f32(), 1.1, festive(&theme), 60.0);
+            }
+            show.celebration = None;
+        }
+    }
+}
+
+fn animate_rockets(time: Res<Time>, mut rockets: Query<(Entity, &mut Rocket, &mut Node)>, mut commands: Commands) {
+    let dt = time.delta_secs();
+    for (entity, mut rocket, mut node) in &mut rockets {
+        rocket.fuse -= dt;
+        let velocity = rocket.velocity;
+        rocket.position += velocity * dt;
+        rocket.velocity.y += 500.0 * dt;
+        node.left = px(rocket.position.x);
+        node.top = px(rocket.position.y);
+        if rocket.fuse <= 0.0 {
+            // The burst: a ring of sparks falling slowly.
+            let n = 36;
+            for i in 0..n {
+                let angle = TAU * i as f32 / n as f32 + fastrand::f32() * 0.2;
+                let speed = 120.0 + 120.0 * fastrand::f32();
+                let size = 3.0 + 3.0 * fastrand::f32();
+                spawn_spark(&mut commands, rocket.position, Vec2::from_angle(angle) * speed, size, 1.3, rocket.color, 90.0);
+            }
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 fn spawn_sparks(commands: &mut Commands, at: Vec2, color: Color, error: bool) {
     let n = if error { 10 } else { 6 };
     for _ in 0..n {
@@ -78,27 +255,7 @@ fn spawn_sparks(commands: &mut Commands, at: Vec2, color: Color, error: bool) {
         };
         let speed = if error { 80.0 + 160.0 * fastrand::f32() } else { 120.0 + 160.0 * fastrand::f32() };
         let size = 3.0 + 3.0 * fastrand::f32();
-        commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(at.x),
-                top: px(at.y),
-                width: px(size),
-                height: px(size),
-                border_radius: BorderRadius::all(percent(50)),
-                ..default()
-            },
-            BackgroundColor(color),
-            GlobalZIndex(100),
-            Pickable::IGNORE,
-            Spark {
-                position: at,
-                velocity: Vec2::from_angle(angle) * speed,
-                age: 0.0,
-                life: if error { 0.35 } else { 0.5 },
-                color,
-            },
-        ));
+        spawn_spark(commands, at, Vec2::from_angle(angle) * speed, size, if error { 0.35 } else { 0.5 }, color, 0.0);
     }
 }
 
@@ -173,7 +330,7 @@ fn animate_keys(
     let t = time.elapsed_secs();
     for (entity, cap, mut transform, pressed) in &mut keys {
         let mut scale = 1.0;
-        if cap.role == KeyRole::Target && !progress.reduce_motion {
+        if matches!(cap.role, KeyRole::Target | KeyRole::Missed) && !progress.reduce_motion {
             scale += 0.045 * (0.5 + 0.5 * (t * 5.0).sin());
         }
         if let Some(mut pressed) = pressed {
@@ -213,7 +370,8 @@ fn animate_sparks(time: Res<Time>, mut sparks: Query<(Entity, &mut Spark, &mut N
         }
         let velocity = spark.velocity;
         spark.position += velocity * dt;
-        spark.velocity *= 1.0 - 3.0 * dt;
+        spark.velocity *= 1.0 - 2.0 * dt;
+        spark.velocity.y += spark.gravity * dt;
         node.left = px(spark.position.x);
         node.top = px(spark.position.y);
         color.0 = spark.color.with_alpha(1.0 - spark.age / spark.life);

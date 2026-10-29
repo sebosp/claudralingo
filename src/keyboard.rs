@@ -18,13 +18,15 @@ use bevy::feathers::constants::fonts;
 use bevy::feathers::theme::{ThemeBackgroundColor, ThemeToken, UiTheme};
 use bevy::picking::events::{PointerClick, PointerPress, PointerRelease};
 use bevy::picking::pointer::PointerButton;
+use bevy::color::Mix;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 use bevy::text::FontSource;
 
-use crate::game::{ActiveLayout, Coach, KeyPressed};
+use crate::game::{ActiveLayout, Coach, Exercise, KeyPressed};
+use crate::klavaro::tutor::Query as TutorQuery;
 use crate::klavaro::{HYPER_BACKSPACE, UPSYM};
 use crate::klavaro::BACKSPACE;
 use crate::layout::{Chord, KeyName, Layout, Mods, Output, Plan, Special, Target};
@@ -79,6 +81,8 @@ pub enum KeyRole {
     Shift,
     Hold,
     Erase,
+    /// Missed in a failed exercise.
+    Missed,
 }
 
 impl KeyRole {
@@ -88,7 +92,7 @@ impl KeyRole {
             KeyRole::Target => (tokens::KEY_TARGET, tokens::KEY_TEXT_ON_HINT),
             KeyRole::Shift => (tokens::KEY_SHIFT, tokens::KEY_TEXT_ON_HINT),
             KeyRole::Hold => (tokens::KEY_HOLD, tokens::KEY_TEXT_ON_HINT),
-            KeyRole::Erase => (tokens::KEY_ERASE, tokens::KEY_TEXT_ON_HINT),
+            KeyRole::Erase | KeyRole::Missed => (tokens::KEY_ERASE, tokens::KEY_TEXT_ON_HINT),
         }
     }
 }
@@ -116,6 +120,8 @@ pub struct KeyboardView {
     pub keys: Vec<KeyEntities>,
     built: bool,
     legends: Option<(u8, bool)>,
+    /// The keys showing a missed character instead of their legend.
+    review: Vec<(usize, char)>,
     /// The fade of the legends on the screen, it follows the coach smoothly.
     shown_fade: f32,
     /// The layer shown and used after a click on its layer key.
@@ -198,6 +204,7 @@ fn rebuild_keyboard(
         keys: keys.into_iter().flatten().collect(),
         built: true,
         legends: None,
+        review: Vec::new(),
         shown_fade: 1.0,
         preview: None,
         held_layer: None,
@@ -406,6 +413,8 @@ fn to_vec4(color: Color) -> Vec4 {
 #[allow(clippy::too_many_arguments)]
 fn update_hints(
     coach: Res<Coach>,
+    exercise: Res<Exercise>,
+    progress: Res<crate::progress::Progress>,
     layout: Res<ActiveLayout>,
     theme: Res<UiTheme>,
     time: Res<Time>,
@@ -485,6 +494,19 @@ fn update_hints(
             force(&mut roles, key);
         }
     }
+    // After a failed exercise, the most missed keys in red, on any layer.
+    let mut review: Vec<(usize, char)> = Vec::new();
+    if exercise.tutor.query == TutorQuery::End {
+        for c in &exercise.review {
+            if let Some(plan) = layout.plan(Target::Char(*c)) {
+                roles[plan.key] = KeyRole::Missed;
+                forced[plan.key] = true;
+                review.push((plan.key, *c));
+            }
+        }
+    }
+    // The red keys breathe, the reduced motion keeps them still.
+    let breath = if progress.reduce_motion { 1.0 } else { 0.55 + 0.45 * (time.elapsed_secs() * 3.0).sin() };
     let in_plan = |key: usize| in_plan[key];
     let border = theme.color(&tokens::KEY_BORDER);
 
@@ -502,7 +524,13 @@ fn update_hints(
         let (fill_token, text_token) = role.tokens();
         // The finger stripe of Klavaro's colored keyboard.
         let finger = theme.color(&stripe_token(&layout.keys[index]));
-        let colors = (theme.color(&fill_token), border, finger);
+        let fill = if role == KeyRole::Missed {
+            let idle = LinearRgba::from(theme.color(&tokens::KEY_BG));
+            Color::from(idle.mix(&LinearRgba::from(theme.color(&fill_token)), breath))
+        } else {
+            theme.color(&fill_token)
+        };
+        let colors = (fill, border, finger);
         if entities.colors != Some(colors)
             && let Some(mut material) = materials.get_mut(&entities.material)
         {
@@ -543,16 +571,22 @@ fn update_hints(
         (Some(plan), None) if show_plan => (plan.layer, plan.shift),
         _ => (0, false),
     };
-    if view.legends != Some(legends) {
+    if view.legends != Some(legends) || view.review != review {
         for (index, key) in layout.keys.iter().enumerate() {
+            let legend = match review.iter().find(|(k, _)| *k == index) {
+                Some((_, ' ')) => "Spc".to_string(),
+                Some((_, c)) => c.to_string(),
+                None => key.legend(legends.0, legends.1, &layout.layer_names),
+            };
             if let Ok((mut text, _)) = texts.get_mut(view.keys[index].legend) {
-                text.0 = key.legend(legends.0, legends.1, &layout.layer_names);
+                text.0 = legend;
             } else {
                 // Spawned this frame, the legends are refreshed on the next frame.
                 return;
             }
         }
         view.legends = Some(legends);
+        view.review = review;
     }
 
     let instructions = if let Some(hint) = layer_hint {

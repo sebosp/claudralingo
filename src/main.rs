@@ -142,6 +142,8 @@ mod snapshot {
     #[allow(clippy::too_many_arguments)]
     fn run(
         mut frame: Local<u32>,
+        (mut typed_at, mut shot, mut after_shot): (Local<f32>, Local<bool>, Local<u32>),
+        time: Res<Time<Real>>,
         snapshot: Res<Snapshot>,
         window: Single<Entity, With<PrimaryWindow>>,
         coach: Res<Coach>,
@@ -229,14 +231,28 @@ mod snapshot {
             Some(c) => tap(&mut keys, window, *c),
             None => {}
         }
-        let done = start + 3 * snapshot.typing.len() + 30;
-        if *frame as usize == done {
+        // `CLAUDRALINGO_WAIT` seconds after the typing, for the animations at the end.
+        let typed_until = start + 3 * snapshot.typing.len() + 30;
+        let wait: f32 = std::env::var("CLAUDRALINGO_WAIT").ok().and_then(|w| w.parse().ok()).unwrap_or(0.0);
+        if *frame as usize == typed_until {
+            *typed_at = time.elapsed_secs();
+        }
+        let done = if (*frame as usize) < typed_until || time.elapsed_secs() - *typed_at < wait {
+            usize::MAX
+        } else {
+            *frame as usize
+        };
+        if *frame as usize == done && !*shot {
+            *shot = true;
             commands
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(snapshot.path.clone()));
         }
-        if *frame as usize == done + 20 {
-            exit.write(AppExit::Success);
+        if *shot {
+            *after_shot += 1;
+            if *after_shot == 20 {
+                exit.write(AppExit::Success);
+            }
         }
     }
 }

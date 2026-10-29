@@ -88,8 +88,8 @@ impl BackgroundLevel {
     pub fn strength(self) -> f32 {
         match self {
             BackgroundLevel::Off => 0.0,
-            BackgroundLevel::Subtle => 0.55,
-            BackgroundLevel::Lively => 1.0,
+            BackgroundLevel::Subtle => 0.4,
+            BackgroundLevel::Lively => 0.8,
         }
     }
 }

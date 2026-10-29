@@ -39,7 +39,11 @@ Differences to Klavaro:
 - The first key starts the timer, there is no "press any key" intro.
 - The misses and touch times are recorded in the basic course too.
 - At the end of an exercise Enter starts the next one, Backspace goes back one basic lesson, as in
-  Klavaro.
+  Klavaro. A basic lesson at 95% or more unlocks the next one by itself, as in Klavaro.
+- The end of an exercise shows how it went: fireworks for a perfect one, sparkles when the goal is
+  reached, and when it is not, the most missed keys red and breathing on the keyboard (with their
+  characters, on any layer) until the next exercise, named in the comment too. Reduce motion
+  keeps the red keys still and skips the fireworks.
 
 The basic lessons are masks over the 4x14 key grid of Klavaro's `qwerty_us.kbd`, their characters
 are the same for both layouts: on the Corne the digits and most symbols are on the layers.

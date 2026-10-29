@@ -170,8 +170,8 @@ fn update_background(
     }
     // Quiet on the dark windows, a little stronger on the light ones.
     let edges = match *mode {
-        ThemeMode::Dark => 0.16,
-        ThemeMode::Light => 0.3,
+        ThemeMode::Dark => 0.13,
+        ThemeMode::Light => 0.24,
     } * progress.background.strength();
     // A wrapped time keeps the precision of the shader, reduced motion stops the mesh.
     let t = if progress.reduce_motion { 120.0 } else { (time.elapsed_secs_f64() % 10_000.0) as f32 };

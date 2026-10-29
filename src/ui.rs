@@ -480,6 +480,8 @@ fn help_overlay() -> impl Scene {
     }
 }
 
+/// The live statistics and the progress of the exercise, on a panel of their own: the
+/// background does not run under them.
 fn stats_bar() -> impl Scene {
     bsn! {
         Node {
@@ -488,21 +490,25 @@ fn stats_bar() -> impl Scene {
             align_items: AlignItems::Center,
             row_gap: px(6),
             width: px(640),
+            padding: UiRect::axes(px(16), px(8)),
+            border_radius: BorderRadius::all(px(10)),
+            margin: UiRect::top(px(6)),
         }
+        ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
         Children [
             @label("") LiveStats
             --
             Node {
                 width: percent(100),
-                height: px(4),
-                border_radius: BorderRadius::all(px(2)),
+                height: px(6),
+                border_radius: BorderRadius::all(px(3)),
             }
             ThemeBackgroundColor(tokens::PROGRESS_TRACK)
             Children [
                 Node {
                     width: percent(0),
                     height: percent(100),
-                    border_radius: BorderRadius::all(px(2)),
+                    border_radius: BorderRadius::all(px(3)),
                 }
                 ThemeBackgroundColor(tokens::PROGRESS_BAR)
                 ProgressBar
