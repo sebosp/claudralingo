@@ -221,8 +221,10 @@ pub struct Progress {
     pub show_hands: bool,
     /// A bigger text to type, for the tired or weaker eyes.
     pub large_text: bool,
-    /// The scale of the whole window, see [`crate::zoom`].
-    pub zoom: f32,
+    /// The window is scaled to fit its size, see [`crate::zoom`].
+    pub fit_window: bool,
+    /// The zoom over the fit to the window, or over 100% without it.
+    pub zoom_factor: f32,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -239,7 +241,8 @@ impl Default for Progress {
             reduce_motion: false,
             show_hands: true,
             large_text: false,
-            zoom: 1.0,
+            fit_window: true,
+            zoom_factor: 1.0,
             layouts: BTreeMap::new(),
         }
     }

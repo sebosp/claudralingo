@@ -1,6 +1,8 @@
-//! The zoom of the whole window, for the small or far screens: Ctrl and the mouse wheel, a pinch
-//! of the trackpad, Ctrl+= Ctrl+- Ctrl+0, or the buttons of the settings. It is saved with the
-//! progress. In the browser, its own zoom takes Ctrl, the wheel and the keys.
+//! The zoom of the whole window. By default the window is scaled to fit its size: a big screen
+//! shows everything bigger. Over that, Ctrl and the mouse wheel, a pinch of the trackpad,
+//! Ctrl+= Ctrl+- Ctrl+0, or the buttons of the settings zoom in and out, the window scrolls
+//! when it does not fit any more. It is saved with the progress. In the browser, its own zoom
+//! takes Ctrl, the wheel and the keys.
 use bevy::input::gestures::PinchGesture;
 use bevy::input::keyboard::Key;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
@@ -12,6 +14,17 @@ pub const MIN_ZOOM: f32 = 0.5;
 pub const MAX_ZOOM: f32 = 3.0;
 /// The zoom of a key press or a button, a factor.
 const STEP: f32 = 1.1;
+/// The size of the window at 100%, from the toolbar down to the hands: the rankings may
+/// scroll.
+const DESIGN: Vec2 = Vec2::new(1180.0, 760.0);
+
+/// The scale that fits the window.
+pub fn fit(window: Vec2) -> f32 {
+    if window.x <= 0.0 || window.y <= 0.0 {
+        return 1.0;
+    }
+    (window / DESIGN).min_element().clamp(MIN_ZOOM, MAX_ZOOM)
+}
 
 /// Changes the zoom.
 #[derive(Message, Debug, Clone, Copy, PartialEq)]
@@ -38,9 +51,10 @@ impl Zoom {
         }
     }
 
-    fn apply(self, zoom: f32) -> f32 {
+    /// The new zoom factor over the base scale, the zoom stays between the bounds.
+    fn apply(self, factor: f32, base: f32) -> f32 {
         match self {
-            Zoom::By(factor) => (zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM),
+            Zoom::By(by) => (factor * by).clamp(MIN_ZOOM / base, MAX_ZOOM / base),
             Zoom::Reset => 1.0,
         }
     }
@@ -79,17 +93,24 @@ fn gestures(
     }
 }
 
-fn apply_zoom(mut changes: MessageReader<Zoom>, mut progress: ResMut<Progress>, mut scale: ResMut<UiScale>) {
-    let mut zoom = progress.zoom;
+fn apply_zoom(
+    mut changes: MessageReader<Zoom>,
+    mut progress: ResMut<Progress>,
+    mut scale: ResMut<UiScale>,
+    window: Single<&Window>,
+) {
+    let base = if progress.fit_window { fit(window.size()) } else { 1.0 };
+    let mut factor = progress.zoom_factor;
     for change in changes.read() {
-        zoom = change.apply(zoom);
+        factor = change.apply(factor, base);
     }
-    if zoom != progress.zoom {
+    if factor != progress.zoom_factor {
         // The autosave writes it.
-        progress.zoom = zoom;
+        progress.zoom_factor = factor;
     }
-    if scale.0 != progress.zoom {
-        scale.0 = progress.zoom;
+    let zoom = (base * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+    if scale.0 != zoom {
+        scale.0 = zoom;
     }
 }
 
@@ -104,13 +125,17 @@ mod tests {
 
     #[test]
     fn steps_stay_in_range() {
-        let mut zoom = 1.0;
+        let base = 2.0;
+        let mut factor = 1.0;
         for _ in 0..50 {
-            zoom = Zoom::IN.apply(zoom);
+            factor = Zoom::IN.apply(factor, base);
         }
-        assert_eq!(zoom, MAX_ZOOM);
-        assert_eq!(Zoom::Reset.apply(zoom), 1.0);
-        assert!((Zoom::OUT.apply(Zoom::IN.apply(1.0)) - 1.0).abs() < 1e-6);
+        assert_eq!(factor * base, MAX_ZOOM);
+        assert_eq!(Zoom::Reset.apply(factor, base), 1.0);
+        assert!((Zoom::OUT.apply(Zoom::IN.apply(1.0, base), base) - 1.0).abs() < 1e-6);
+        // A big window shows everything bigger, the window of the native build fits.
+        assert_eq!(fit(Vec2::new(2360.0, 1520.0)), 2.0);
+        assert!(fit(Vec2::new(1280.0, 880.0)) > 1.0);
         assert_eq!(Zoom::of_key(&Key::Character("=".into())), Some(Zoom::IN));
         assert_eq!(Zoom::of_key(&Key::Character("a".into())), None);
     }

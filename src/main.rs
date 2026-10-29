@@ -168,10 +168,12 @@ mod snapshot {
             };
         }
         // The help of the first start, kept with `CLAUDRALINGO_HELP`, `CLAUDRALINGO_SETTINGS`
-        // opens the settings.
+        // opens the settings, `CLAUDRALINGO_LESSONS` the lessons.
         if *frame == 45 {
             if std::env::var_os("CLAUDRALINGO_SETTINGS").is_some() {
                 *panel = claudralingo::ui::Panel::Settings;
+            } else if std::env::var_os("CLAUDRALINGO_LESSONS").is_some() {
+                *panel = claudralingo::ui::Panel::Lessons;
             } else if std::env::var_os("CLAUDRALINGO_HELP").is_none() {
                 *panel = claudralingo::ui::Panel::None;
             }

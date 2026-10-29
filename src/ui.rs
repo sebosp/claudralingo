@@ -3,13 +3,14 @@
 use bevy::feathers::containers::{flex_spacer, group, group_body, group_header};
 use bevy::feathers::controls::*;
 use bevy::feathers::display::{caption, label, label_dim};
-use bevy::feathers::theme::ThemeBackgroundColor;
+use bevy::feathers::theme::{ThemeBackgroundColor, ThemeTextColor};
 use bevy::feathers::tokens as feathers_tokens;
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
 use bevy::ui::{Checked, Selected};
-use bevy::picking::events::PointerClick;
+use bevy::input::mouse::MouseScrollPixelsPerLine;
+use bevy::picking::events::{PointerClick, PointerScroll};
 use bevy::ui_widgets::{Activate, ValueChange};
 
 use crate::drills::FINGERS;
@@ -62,6 +63,10 @@ pub struct MessageText;
 #[derive(Component, Default, Clone)]
 struct RankingText;
 
+/// The accuracy at the end, green when the goal is reached, red otherwise.
+#[derive(Component, Default, Clone)]
+struct AccuracyText;
+
 #[derive(Component, Default, Clone)]
 struct ModeSelect;
 
@@ -75,6 +80,7 @@ enum Setting {
     ShowHands,
     ReduceMotion,
     LargeText,
+    FitWindow,
 }
 
 #[derive(Component, Default, Clone)]
@@ -86,11 +92,22 @@ struct SuggestButton;
 #[derive(Component, Default, Clone)]
 struct ZoomLabel;
 
+/// The column of the window that scrolls when zoomed in.
+#[derive(Component, Default, Clone)]
+struct WindowScroll;
+
 #[derive(Component, Default, Clone)]
 struct HelpOverlay;
 
 #[derive(Component, Default, Clone)]
 struct SettingsOverlay;
+
+#[derive(Component, Default, Clone)]
+struct LessonsOverlay;
+
+/// The tiles of the lessons, filled when the panel opens.
+#[derive(Component, Default, Clone)]
+struct LessonsGrid;
 
 /// The panel over the window, it takes the keys.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +116,7 @@ pub enum Panel {
     None,
     Help,
     Settings,
+    Lessons,
 }
 
 impl Panel {
@@ -116,6 +134,7 @@ MODES, the first menu
 
 TOOLBAR
   ‹ ›  the lesson, the finger or the hand    Restart  a new text
+  Lessons  the lessons of the basic course with your accuracy, click one to practice it again
   Settings  the keyboard, dark mode, the background, motion, hands, text size, zoom and:
     Fade legends  the letters fade while you type well, an error or a pause shows the next key
     Layer trainer  always shows the layer and the modifier keys to hold
@@ -157,9 +176,10 @@ impl Plugin for UiPlugin {
                 update_message,
                 update_suggestion,
                 show_panels.run_if(resource_changed::<Panel>),
+                fill_lessons.run_if(resource_changed::<Panel>),
                 show_hands,
                 update_rankings.run_if(resource_changed::<Progress>),
-                update_zoom_label.run_if(resource_changed::<Progress>),
+                update_zoom_label.run_if(resource_changed::<UiScale>),
             )
                 .after(crate::game::GameSystems),
         );
@@ -199,85 +219,107 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
             }
             BackgroundRoot
             --
-            @toolbar(modes)
-            --
-            @stats_bar()
-            --
-            // The text, the shortcuts or the results, in the same place.
+            // Everything but the overlays scrolls, zoomed in.
             Node {
+                width: percent(100),
+                height: percent(100),
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
                 row_gap: px(10),
-                min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
-                margin: UiRect::top(px(6)),
+                overflow: Overflow::scroll_y(),
             }
-            ExerciseArea
+            ScrollPosition::default()
+            WindowScroll
+            on(scroll_window)
             Children [
+                @toolbar(modes)
+                --
+                @stats_bar()
+                --
+                // The text, the shortcuts or the results, in the same place.
                 Node {
                     display: Display::Flex,
                     flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Start,
-                }
-                PromptRoot
-                --
-                Node {
-                    display: Display::None,
-                    flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    row_gap: px(6),
+                    justify_content: JustifyContent::Center,
+                    row_gap: px(10),
+                    min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
+                    margin: UiRect::top(px(6)),
                 }
-                ShortcutsRoot
+                ExerciseArea
+                Children [
+                    Node {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Start,
+                    }
+                    PromptRoot
+                    --
+                    Node {
+                        display: Display::None,
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: px(6),
+                    }
+                    ShortcutsRoot
+                    --
+                    @label("") AccuracyText
+                    Node {
+                        display: Display::None,
+                    }
+                    --
+                    @label("") MessageText
+                    Node {
+                        display: Display::None,
+                    }
+                    TextLayout {
+                        justify: Justify::Center,
+                    }
+                    --
+                    @FeathersButton {
+                        @caption: bsn! { @caption("") SuggestCaption }
+                    }
+                    SuggestButton
+                    Node {
+                        display: Display::None,
+                    }
+                    on(train_suggested_finger)
+                ]
                 --
-                @label("") MessageText
+                @label("") TrainerHint
                 Node {
-                    display: Display::None,
-                }
-                TextLayout {
-                    justify: Justify::Center,
+                    min_height: px(20),
                 }
                 --
-                @FeathersButton {
-                    @caption: bsn! { @caption("") SuggestCaption }
-                }
-                SuggestButton
                 Node {
-                    display: Display::None,
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Start,
+                    column_gap: px(48),
+                    padding: px(8),
                 }
-                on(train_suggested_finger)
+                KeyboardRoot
+                --
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::End,
+                }
+                HandsRoot
+                --
+                @flex_spacer()
+                --
+                @rankings()
             ]
-            --
-            @label("") TrainerHint
-            Node {
-                min_height: px(20),
-            }
-            --
-            Node {
-                display: Display::Flex,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Start,
-                column_gap: px(48),
-                padding: px(8),
-            }
-            KeyboardRoot
-            --
-            Node {
-                display: Display::Flex,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::End,
-            }
-            HandsRoot
-            --
-            @flex_spacer()
-            --
-            @rankings()
             --
             @help_overlay()
             --
             @settings_overlay(layouts, backgrounds)
+            --
+            @lessons_overlay()
         ]
     }
 }
@@ -327,6 +369,11 @@ fn toolbar(modes: Box<dyn SceneList>) -> impl Scene {
             on(restart)
             --
             @flex_spacer()
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("Lessons") }
+            }
+            on(toggle_lessons)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("Settings") }
@@ -473,7 +520,9 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         on(zoom_reset)
                     ]
                     --
-                    @label_dim("Or Ctrl and the mouse wheel, a pinch of the trackpad, Ctrl+= Ctrl+- Ctrl+0")
+                    @setting_checkbox(Setting::FitWindow, "Fit the window: a bigger window shows everything bigger")
+                    --
+                    @label_dim("Or Ctrl and the mouse wheel, a pinch of the trackpad, Ctrl+= Ctrl+- Ctrl+0, the wheel scrolls")
                     --
                     @FeathersButton {
                         @caption: bsn! { @caption("Close") }
@@ -483,6 +532,163 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                 ]
             ]
         ]
+    }
+}
+
+/// The lessons of the basic course with their accuracy, a click practices one again.
+fn lessons_overlay() -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            display: Display::None,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        GlobalZIndex(50)
+        LessonsOverlay
+        Children [
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                top: px(0),
+                width: percent(100),
+                height: percent(100),
+            }
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6))
+            on(close_panel)
+            --
+            @group()
+            Node {
+                width: px(820),
+            }
+            Children [
+                @group_header() Children [ @label("Lessons of the basic course") ]
+                --
+                @group_body()
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(10),
+                }
+                Children [
+                    @label_dim("The best and the last accuracy, the times typed: green when the best reached 95%, red below. Click a lesson to practice it again.")
+                    --
+                    Node {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: px(6),
+                        row_gap: px(6),
+                    }
+                    LessonsGrid
+                    --
+                    @FeathersButton {
+                        @caption: bsn! { @caption("Close") }
+                        @variant: ButtonVariant::Primary,
+                    }
+                    on(close_settings)
+                ]
+            ]
+        ]
+    }
+}
+
+/// The characters on a tile of the lessons.
+const MAX_TILE_CHARS: usize = 7;
+
+/// The best and the last accuracy of a lesson of the basic course, and the times typed.
+fn lesson_stats(progress: &Progress, lesson: usize) -> Option<(f64, f64, usize)> {
+    let layout = progress.layouts.get(progress.layout.key())?;
+    let accuracies: Vec<f64> = layout
+        .sessions
+        .iter()
+        .filter(|s| s.mode == ExerciseMode::Basic && s.lesson == Some(lesson))
+        .map(|s| s.accuracy)
+        .collect();
+    let last = *accuracies.last()?;
+    Some((accuracies.iter().copied().fold(0.0, f64::max), last, accuracies.len()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fill_lessons(
+    panel: Res<Panel>,
+    progress: Res<Progress>,
+    grid: Res<crate::game::Grid>,
+    theme: Res<bevy::feathers::theme::UiTheme>,
+    asset_server: Res<AssetServer>,
+    grids: Query<Entity, With<LessonsGrid>>,
+    mut commands: Commands,
+) {
+    if *panel != Panel::Lessons {
+        return;
+    }
+    let font = |size: f32| TextFont {
+        font: bevy::text::FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::REGULAR)),
+        font_size: FontSize::Px(size),
+        ..default()
+    };
+    let current = progress.layouts.get(progress.layout.key()).map(|l| l.basic_lesson).unwrap_or(1);
+    let goal = crate::klavaro::basic::GOAL_ACCURACY;
+    for root in &grids {
+        commands.entity(root).despawn_children();
+        for lesson in 1..=N_BASIC_LESSONS {
+            // The characters of the lesson, the long sets shortened.
+            let chars = crate::klavaro::basic::lesson_char_set(lesson, &grid.0);
+            let mut shown: String = chars.iter().take(MAX_TILE_CHARS).collect();
+            if chars.len() > MAX_TILE_CHARS {
+                shown.push('…');
+            }
+            let stats = lesson_stats(&progress, lesson);
+            // The status in words and in color: green reached, red below the goal.
+            let (status, detail) = match stats {
+                Some((best, last, n)) => (
+                    Some(if best >= goal { tokens::CHAR_CORRECT } else { tokens::CHAR_WRONG }),
+                    format!("best {best:.0}%\nlast {last:.0}% · {n}×"),
+                ),
+                None => (None, "not yet".to_string()),
+            };
+            let border = if lesson == current { theme.color(&tokens::CURSOR) } else { Color::NONE };
+            let tile = commands
+                .spawn((
+                    Node {
+                        width: px(92),
+                        height: px(68),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::axes(px(6), px(4)),
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(6)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(theme.color(&tokens::KEY_BG)),
+                    BorderColor::all(border),
+                    ChildOf(root),
+                ))
+                .observe(move |_: On<PointerClick>, mut progress: ResMut<Progress>, mut panel: ResMut<Panel>, mut new_exercise: MessageWriter<NewExercise>| {
+                    progress.mode = ExerciseMode::Basic;
+                    progress.current().basic_lesson = lesson;
+                    progress.save();
+                    new_exercise.write_default();
+                    *panel = Panel::None;
+                })
+                .id();
+            commands.spawn((
+                Text::new(format!("{lesson}  {shown}")),
+                font(15.0),
+                TextLayout::no_wrap(),
+                ThemeTextColor(feathers_tokens::TEXT_MAIN),
+                Pickable::IGNORE,
+                ChildOf(tile),
+            ));
+            commands.spawn((
+                Text::new(detail),
+                font(12.0),
+                ThemeTextColor(status.unwrap_or(feathers_tokens::TEXT_DIM)),
+                Pickable::IGNORE,
+                ChildOf(tile),
+            ));
+        }
     }
 }
 
@@ -580,6 +786,7 @@ impl Setting {
             Setting::ShowHands => progress.show_hands,
             Setting::ReduceMotion => progress.reduce_motion,
             Setting::LargeText => progress.large_text,
+            Setting::FitWindow => progress.fit_window,
         }
     }
 }
@@ -625,6 +832,7 @@ fn on_setting_change(
         Setting::ShowHands => progress.show_hands = change.value,
         Setting::ReduceMotion => progress.reduce_motion = change.value,
         Setting::LargeText => progress.large_text = change.value,
+        Setting::FitWindow => progress.fit_window = change.value,
     }
     progress.save();
     release_focus(&mut focus);
@@ -737,6 +945,28 @@ fn next_lesson(
     release_focus(&mut focus);
 }
 
+/// The wheel and the trackpad scroll the window, not with Ctrl: that zooms.
+fn scroll_window(
+    mut scroll: On<PointerScroll>,
+    keys: Res<ButtonInput<KeyCode>>,
+    ratio: Res<MouseScrollPixelsPerLine>,
+    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<WindowScroll>>,
+) {
+    scroll.propagate(false);
+    if keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) {
+        return;
+    }
+    let delta = scroll.to_pixels(&ratio);
+    for (node, mut position) in &mut areas {
+        let visible = node.size().y * node.inverse_scale_factor;
+        let content = node.content_size().y * node.inverse_scale_factor;
+        let y = (position.y - delta.y).clamp(0.0, (content - visible).max(0.0));
+        if position.y != y {
+            position.y = y;
+        }
+    }
+}
+
 fn zoom_in(_: On<Activate>, mut zoom: MessageWriter<Zoom>, mut focus: ResMut<InputFocus>) {
     zoom.write(Zoom::IN);
     release_focus(&mut focus);
@@ -752,9 +982,9 @@ fn zoom_reset(_: On<Activate>, mut zoom: MessageWriter<Zoom>, mut focus: ResMut<
     release_focus(&mut focus);
 }
 
-fn update_zoom_label(progress: Res<Progress>, mut labels: Query<&mut Text, With<ZoomLabel>>) {
+fn update_zoom_label(scale: Res<UiScale>, mut labels: Query<&mut Text, With<ZoomLabel>>) {
     for mut text in &mut labels {
-        let percent = crate::zoom::percent(progress.zoom);
+        let percent = crate::zoom::percent(scale.0);
         if text.0 != percent {
             text.0 = percent;
         }
@@ -788,6 +1018,11 @@ fn first_help(mut progress: ResMut<Progress>, mut panel: ResMut<Panel>) {
 
 fn toggle_help(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
     panel.toggle(Panel::Help);
+    release_focus(&mut focus);
+}
+
+fn toggle_lessons(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    panel.toggle(Panel::Lessons);
     release_focus(&mut focus);
 }
 
@@ -828,8 +1063,9 @@ fn on_background_change(
 
 fn show_panels(
     panel: Res<Panel>,
-    mut helps: Query<&mut Node, (With<HelpOverlay>, Without<SettingsOverlay>)>,
-    mut settings: Query<&mut Node, With<SettingsOverlay>>,
+    mut helps: Query<&mut Node, HelpOnly>,
+    mut settings: Query<&mut Node, (With<SettingsOverlay>, Without<LessonsOverlay>)>,
+    mut lessons: Query<&mut Node, With<LessonsOverlay>>,
 ) {
     let show = |visible: bool| if visible { Display::Flex } else { Display::None };
     for mut node in &mut helps {
@@ -837,6 +1073,9 @@ fn show_panels(
     }
     for mut node in &mut settings {
         node.display = show(*panel == Panel::Settings);
+    }
+    for mut node in &mut lessons {
+        node.display = show(*panel == Panel::Lessons);
     }
 }
 
@@ -859,7 +1098,10 @@ fn display_char(c: char) -> String {
     }
 }
 
-type PromptOnly = (With<PromptRoot>, Without<ShortcutsRoot>, Without<MessageText>);
+type HelpOnly = (With<HelpOverlay>, Without<SettingsOverlay>, Without<LessonsOverlay>);
+type PromptOnly = (With<PromptRoot>, Without<ShortcutsRoot>, Without<MessageText>, Without<AccuracyText>);
+type ShortcutsOnly = (With<ShortcutsRoot>, Without<MessageText>, Without<AccuracyText>);
+type AccuracyOnly = (With<AccuracyText>, Without<MessageText>);
 
 /// The text of the typing exercises or the tasks of the shortcuts, the results at the end.
 fn show_mode_views(
@@ -867,8 +1109,9 @@ fn show_mode_views(
     exercise: Res<Exercise>,
     drill: Res<Drill>,
     mut prompts: Query<&mut Node, PromptOnly>,
-    mut shortcuts: Query<&mut Node, (With<ShortcutsRoot>, Without<MessageText>)>,
+    mut shortcuts: Query<&mut Node, ShortcutsOnly>,
     mut messages: Query<&mut Node, With<MessageText>>,
+    mut accuracies: Query<&mut Node, AccuracyOnly>,
 ) {
     let typing = progress.mode.is_typing();
     let ended = if typing { exercise.tutor.query == TutorQuery::End } else { drill.finished.is_some() };
@@ -886,6 +1129,9 @@ fn show_mode_views(
     }
     for mut node in &mut messages {
         set(&mut node, ended);
+    }
+    for mut node in &mut accuracies {
+        set(&mut node, typing && ended);
     }
 }
 
@@ -981,9 +1227,27 @@ fn update_message(
     drill: Res<Drill>,
     progress: Res<Progress>,
     mut labels: Query<&mut Text, With<MessageText>>,
+    mut accuracies: Query<(Entity, &mut Text), AccuracyOnly>,
+    mut commands: Commands,
 ) {
     if !exercise.is_changed() && !drill.is_changed() && !progress.is_changed() {
         return;
+    }
+    if let Some(results) = exercise.tutor.results.filter(|_| exercise.tutor.query == TutorQuery::End) {
+        let goal = crate::game::goal(exercise.mode);
+        let (text, token) = if results.n_errors == 0 {
+            (format!("Accuracy {:.0}%, perfect!", results.accuracy), tokens::CHAR_CORRECT)
+        } else if results.accuracy >= goal {
+            (format!("Accuracy {:.1}%, goal of {goal:.0}% reached", results.accuracy), tokens::CHAR_CORRECT)
+        } else {
+            (format!("Accuracy {:.1}%, below the goal of {goal:.0}%", results.accuracy), tokens::CHAR_WRONG)
+        };
+        for (entity, mut label) in &mut accuracies {
+            if label.0 != text {
+                label.0.clone_from(&text);
+                commands.entity(entity).insert(ThemeTextColor(token.clone()));
+            }
+        }
     }
     let text = if !progress.mode.is_typing() {
         drill.summary.clone()
@@ -1004,8 +1268,8 @@ fn update_message(
             keys = format!("{} · Tab: {} drill · {keys}", capitalize(reason), finger_name(*finger));
         }
         format!(
-            "Accuracy {:.1}% · {:.1} WPM · fluidness {:.0}%\n{}\n{keys}",
-            results.accuracy, results.velocity, results.fluidness, exercise.message
+            "{:.1} WPM · fluidness {:.0}%\n{}\n{keys}",
+            results.velocity, results.fluidness, exercise.message
         )
     } else {
         String::new()

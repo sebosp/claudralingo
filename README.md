@@ -81,8 +81,18 @@ hands the lines blur away.
 
 Settings (toolbar): the keyboard, dark mode, the background (off, subtle, lively), fade legends,
 layer trainer, the hands, reduce motion (no drift, sparks, shakes nor breathing keys), a large
-text to type and the zoom of the whole window (50% to 300%, saved). The zoom also follows Ctrl and
-the mouse wheel, a trackpad pinch, Ctrl+= Ctrl+- Ctrl+0; in the browser its own zoom does that.
+text to type and the zoom. By default the window is scaled to fit its size, a big screen shows
+everything bigger; the zoom adds to that (50% to 300% in all, saved) with the buttons, Ctrl and the
+mouse wheel, a trackpad pinch, Ctrl+= Ctrl+- Ctrl+0 (in the browser its own zoom does that). The
+wheel scrolls the window when it does not fit.
+
+Lessons (toolbar): the 43 lessons of the basic course with the best and the last accuracy and the
+times typed, green when the best reached 95%, red below; a click practices a lesson again. The
+progress is saved in `~/.config/claudralingo/progress.json` (in the browser, its local storage).
+
+At the end of an exercise the accuracy is green when the goal is reached, red otherwise. A line
+typed without an error clears like a row of Tetris with a small firework; a perfect exercise ends
+with fireworks, sparks and congratulations.
 
 ### Finger drills
 

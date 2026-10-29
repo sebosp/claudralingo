@@ -509,6 +509,9 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::bounce_comment(results.accuracy),
         ExerciseMode::Shortcuts => String::new(),
     };
+    if results.n_errors == 0 {
+        exercise.message = format!("Congratulations, not a single error! Well done.\n{}", exercise.message);
+    }
     exercise.suggestion = suggest(exercise, progress, layout);
     if results.accuracy < goal(mode) {
         let mut missed: Vec<(char, u32)> = exercise.misses.iter().map(|(c, n)| (*c, *n)).collect();

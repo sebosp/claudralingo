@@ -40,6 +40,11 @@ pub struct PromptView {
 }
 
 impl PromptView {
+    /// The visual lines: their node, their first and their end char index.
+    pub fn lines(&self) -> &[(Entity, usize, usize)] {
+        &self.lines
+    }
+
     pub fn char_entity(&self, index: usize) -> Option<Entity> {
         self.chars.get(index).copied().flatten().map(|(node, _)| node)
     }

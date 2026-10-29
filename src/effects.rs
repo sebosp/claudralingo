@@ -1,6 +1,7 @@
 //! The animations, inspired by layer-tutor: the pressed keys sink, the next key breathes, the
 //! correct touches send sparks up from the key, the errors short circuit it and shake the
-//! character, the cursor pulses and the comments fade in.
+//! character, the cursor pulses and the comments fade in. A line typed without an error clears
+//! as a row of Tetris, with a small firework, a perfect exercise ends with fireworks and sparks.
 use std::f32::consts::TAU;
 
 use bevy::feathers::theme::UiTheme;
@@ -9,7 +10,7 @@ use bevy::prelude::*;
 use crate::game::{Exercise, TouchResult, Touched};
 use crate::keyboard::{KeyCap, KeyRole, KeyboardView};
 use crate::klavaro::tutor::{CharState, Query as TutorQuery};
-use crate::prompt::PromptView;
+use crate::prompt::{PromptChar, PromptView};
 use crate::theme::tokens;
 use crate::ui::MessageText;
 
@@ -61,10 +62,27 @@ struct Show {
     celebration: Option<Celebration>,
     age: f32,
     launched: u32,
+    /// The sparks of a perfect exercise from its comment, after the first rockets.
+    burst_done: bool,
 }
 
 const FIREWORKS_SECONDS: f32 = 3.0;
 const ROCKETS: u32 = 12;
+
+/// A line typed without an error: it flashes, its characters pop away from the left to the
+/// right and it closes up.
+#[derive(Component)]
+struct RowClear {
+    age: f32,
+    /// The height of the line before.
+    height: f32,
+}
+
+const ROW_FLASH_SECONDS: f32 = 0.3;
+const ROW_POP_SECONDS: f32 = 0.35;
+const ROW_CLOSE_SECONDS: f32 = 0.2;
+/// The delay of a character after the one on its left.
+const ROW_STAGGER: f32 = 0.008;
 
 #[derive(Component)]
 struct FadeIn {
@@ -80,6 +98,8 @@ impl Plugin for EffectsPlugin {
             (
                 on_touch,
                 start_celebration,
+                detect_row_clears,
+                animate_row_clears,
                 celebrate,
                 animate_rockets,
                 fade_in_message,
@@ -137,7 +157,7 @@ fn start_celebration(
         } else {
             None
         };
-        *show = Show { celebration, age: 0.0, launched: 0 };
+        *show = Show { celebration, age: 0.0, launched: 0, burst_done: false };
     }
     *was_end = is_end;
 }
@@ -170,6 +190,17 @@ fn celebrate(
     };
     show.age += time.delta_secs();
     let (width, height) = (window.width(), window.height());
+    // One soft burst from the comment, rising, once the comment is laid out: it shows up with
+    // the end of the exercise.
+    let message = messages.iter().find(|(_, node)| node.size().x > 0.0).map(|(transform, node)| center(transform, node));
+    let burst = |commands: &mut Commands, at: Vec2, n: usize| {
+        for _ in 0..n {
+            let angle = -TAU / 4.0 + (fastrand::f32() - 0.5) * 2.4;
+            let velocity = Vec2::from_angle(angle) * (90.0 + 140.0 * fastrand::f32());
+            let start = at + Vec2::new((fastrand::f32() - 0.5) * 300.0, 0.0);
+            spawn_spark(commands, start, velocity, 3.0 + 2.0 * fastrand::f32(), 1.1, festive(&theme), 60.0);
+        }
+    };
     match celebration {
         Celebration::Fireworks => {
             // The rockets go up from the bottom, one after the other.
@@ -196,27 +227,113 @@ fn celebrate(
                     },
                 ));
             }
+            // The congratulations sparkle too, a lot.
+            if !show.burst_done
+                && show.age > 0.4
+                && let Some(at) = message
+            {
+                burst(&mut commands, at, 60);
+                show.burst_done = true;
+            }
             if show.age > FIREWORKS_SECONDS {
                 show.celebration = None;
             }
         }
         Celebration::Sparkles => {
-            // One soft burst from the comment, rising, once the comment is laid out: it shows
-            // up with the end of the exercise.
-            let Some(at) = messages
-                .iter()
-                .find(|(_, node)| node.size().x > 0.0)
-                .map(|(transform, node)| center(transform, node))
-            else {
+            let Some(at) = message else {
                 return;
             };
-            for _ in 0..28 {
-                let angle = -TAU / 4.0 + (fastrand::f32() - 0.5) * 2.4;
-                let velocity = Vec2::from_angle(angle) * (90.0 + 140.0 * fastrand::f32());
-                let start = at + Vec2::new((fastrand::f32() - 0.5) * 300.0, 0.0);
-                spawn_spark(&mut commands, start, velocity, 3.0 + 2.0 * fastrand::f32(), 1.1, festive(&theme), 60.0);
-            }
+            burst(&mut commands, at, 28);
             show.celebration = None;
+        }
+    }
+}
+
+/// The lines typed without an error, once the cursor left them.
+#[allow(clippy::too_many_arguments)]
+fn detect_row_clears(
+    exercise: Res<Exercise>,
+    prompt: Res<PromptView>,
+    progress: Res<crate::progress::Progress>,
+    theme: Res<UiTheme>,
+    lines: Query<(&Node, &UiGlobalTransform, &ComputedNode)>,
+    mut commands: Commands,
+    mut cleared: Local<(u64, Vec<bool>)>,
+) {
+    let tutor = &exercise.tutor;
+    if !exercise.mode.is_typing() || tutor.states.len() != prompt.chars.len() || prompt.lines().is_empty() {
+        return;
+    }
+    if cleared.0 != exercise.id || cleared.1.len() != prompt.lines().len() {
+        *cleared = (exercise.id, vec![false; prompt.lines().len()]);
+    }
+    let ended = tutor.query == TutorQuery::End;
+    for (i, (entity, start, end)) in prompt.lines().iter().enumerate() {
+        if cleared.1[i] || !(ended || tutor.cursor >= *end) {
+            continue;
+        }
+        cleared.1[i] = true;
+        let perfect = (*start..*end).all(|c| tutor.states[c] == CharState::Correct);
+        let Ok((node, transform, computed)) = lines.get(*entity) else {
+            continue;
+        };
+        if !perfect || ended || progress.reduce_motion {
+            continue;
+        }
+        let height = match node.height {
+            Val::Px(h) => h,
+            _ => computed.size().y * computed.inverse_scale_factor(),
+        };
+        commands.entity(*entity).insert(RowClear { age: 0.0, height });
+        // A small firework from the middle of the row, and sparks along it.
+        let at = center(transform, computed);
+        let width = computed.size().x * computed.inverse_scale_factor();
+        for k in 0..24 {
+            let angle = TAU * k as f32 / 24.0 + fastrand::f32() * 0.2;
+            let speed = 90.0 + 90.0 * fastrand::f32();
+            spawn_spark(&mut commands, at, Vec2::from_angle(angle) * speed, 3.0 + 2.0 * fastrand::f32(), 0.9, festive(&theme), 80.0);
+        }
+        for _ in 0..16 {
+            let x = (fastrand::f32() - 0.5) * width;
+            let velocity = Vec2::new((fastrand::f32() - 0.5) * 40.0, -60.0 - 80.0 * fastrand::f32());
+            spawn_spark(&mut commands, at + Vec2::new(x, 0.0), velocity, 2.0 + 2.0 * fastrand::f32(), 0.7, festive(&theme), 40.0);
+        }
+    }
+}
+
+fn animate_row_clears(
+    time: Res<Time>,
+    theme: Res<UiTheme>,
+    mut rows: Query<(Entity, &mut RowClear, &mut Node, &Children)>,
+    mut chars: Query<(&PromptChar, &mut UiTransform, &mut BackgroundColor), Without<RowClear>>,
+    mut commands: Commands,
+) {
+    let flash = theme.color(&tokens::CHAR_CORRECT);
+    for (entity, mut row, mut node, children) in &mut rows {
+        row.age += time.delta_secs();
+        let first = children.iter().find_map(|c| chars.get(c).ok().map(|(p, _, _)| p.0)).unwrap_or(0);
+        for child in children.iter() {
+            let Ok((PromptChar(index), mut transform, mut background)) = chars.get_mut(child) else {
+                continue;
+            };
+            let t = row.age - (index - first) as f32 * ROW_STAGGER;
+            // The flash, bright then fading, the characters swell a little.
+            let glow = if t < 0.0 { 0.0 } else { 1.0 - (t / ROW_FLASH_SECONDS).min(1.0) };
+            let swell = (t / ROW_FLASH_SECONDS).clamp(0.0, 1.0);
+            let mut scale = 1.0 + 0.25 * (swell * TAU / 2.0).sin();
+            // Then they pop away.
+            let pop = ((t - ROW_FLASH_SECONDS) / ROW_POP_SECONDS).clamp(0.0, 1.0);
+            scale *= 1.0 - pop * pop;
+            background.0 = flash.with_alpha(0.85 * glow.max(0.5 * (1.0 - pop) * swell.min(1.0)));
+            transform.scale = Vec2::splat(scale);
+            transform.translation = Val2::px(0.0, -10.0 * pop);
+        }
+        // The rows below move up into its place.
+        let span = ROW_FLASH_SECONDS + ROW_POP_SECONDS + ROW_STAGGER * children.len() as f32;
+        let close = ((row.age - span) / ROW_CLOSE_SECONDS).clamp(0.0, 1.0);
+        node.height = px(row.height * (1.0 - close * close * (3.0 - 2.0 * close)));
+        if close >= 1.0 {
+            commands.entity(entity).remove::<RowClear>();
         }
     }
 }
