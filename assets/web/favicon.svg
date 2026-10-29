@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Claudralingo: a key cap of the Corne, a C traced as a brush stroke, the green of the next
+       key and the stripe of its finger. -->
+  <rect width="64" height="64" rx="14" fill="#1f1f24"/>
+  <rect x="7" y="6" width="50" height="50" rx="11" fill="#2b3142"/>
+  <rect x="11" y="9" width="42" height="40" rx="8" fill="#353d52"/>
+  <path d="M41.5 20.5 A12 12 0 1 0 41.5 37.5" fill="none" stroke="#22ff88" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="41.5" cy="20.5" r="2.2" fill="#e8fff2"/>
+  <rect x="22" y="51" width="20" height="4" rx="2" fill="#3987e5"/>
+</svg>
