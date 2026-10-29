@@ -63,9 +63,10 @@ jobs:
         run: |
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
-          cargo apk build --release -p claudralingo_mobile --lib
-          find target -name "*.apk" -path "*release*"
-          cp "$(find target -name '*.apk' -path '*release*' | head -1)" claudralingo-android-arm64.apk
+          cd mobile
+          cargo apk build --release --lib
+          find target -name "*.apk"
+          cp "$(find target -name '*.apk' | head -1)" ../claudralingo-android-arm64.apk
       - uses: actions/upload-artifact@v4
         with:
           name: claudralingo-android-arm64
@@ -83,7 +84,7 @@ jobs:
       - name: Build the app
         run: |
           cd mobile
-          xcodebuild -project claudralingo.xcodeproj -scheme claudralingo_mobile -configuration Release \
+          xcodebuild -project claudralingo_mobile.xcodeproj -scheme claudralingo_mobile -configuration Release \
             -sdk iphonesimulator -arch arm64 -derivedDataPath build CODE_SIGNING_ALLOWED=NO
           cd build/Build/Products/Release-iphonesimulator
           zip -qr "$GITHUB_WORKSPACE/claudralingo-ios-simulator.zip" claudralingo_mobile.app

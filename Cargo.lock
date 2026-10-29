@@ -2142,14 +2142,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "claudralingo_mobile"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "claudralingo",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

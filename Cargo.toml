@@ -7,10 +7,6 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 description = "A touch typing tutor in Bevy, Chinese hanzi calligraphy later"
 
-[workspace]
-# The Android and iOS app, `mobile/`.
-members = [".", "mobile"]
-
 [dependencies]
 # No "bevy/dynamic_linking" here: the release binaries are copied to portia-zt, the `dynamic`
 # feature (`cargo dev`) is for the local runs only.

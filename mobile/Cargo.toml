@@ -7,6 +7,9 @@ description = "Claudralingo on Android and iOS"
 publish = false
 license = "GPL-3.0-or-later"
 
+# Its own workspace: cargo-apk does not take a package that is also the root of a workspace.
+[workspace]
+
 [lib]
 name = "claudralingo_mobile"
 # The shared library loaded by the Android activity; the iOS app is the binary.
