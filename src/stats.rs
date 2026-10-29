@@ -244,6 +244,14 @@ pub fn days_from_civil(y: i64, m: u32, d: u32) -> u64 {
     (era * 146_097 + doe - 719_468) as u64
 }
 
+/// `Oct 27`, or `Oct 27 2025` in another year, of a time in seconds since the UNIX epoch.
+pub fn short_date(seconds: u64) -> String {
+    let (y, m, d) = civil(day_of(seconds));
+    let (this_year, _, _) = civil(day_of(now_unix_seconds()));
+    let month = &MONTHS[m as usize - 1][..3];
+    if y == this_year { format!("{month} {d}") } else { format!("{month} {d} {y}") }
+}
+
 const MONTHS: [&str; 12] =
     ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 

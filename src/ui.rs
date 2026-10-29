@@ -98,6 +98,16 @@ struct SuggestButton;
 #[derive(Component, Default, Clone)]
 struct ZoomLabel;
 
+/// Under the live statistics at the end: the trends against the last time of the lesson.
+#[derive(Component, Default, Clone)]
+struct TrendRow;
+#[derive(Component, Default, Clone)]
+struct TrendText(usize);
+
+/// The keys of the moment, at the bottom of the window.
+#[derive(Component, Default, Clone)]
+struct ActionsText;
+
 /// The result of the last keymap import.
 #[derive(Component, Default, Clone)]
 struct KeymapStatus;
@@ -199,6 +209,9 @@ impl Plugin for UiPlugin {
                 fill_lessons.run_if(resource_changed::<Panel>),
                 show_hands,
                 show_hanzi,
+                update_trends,
+                update_actions,
+                arrow_lessons.after(crate::game::GameSystems),
                 import_keymap,
                 update_rankings.run_if(|p: Res<Progress>, panel: Res<Panel>| p.is_changed() || panel.is_changed()),
                 update_zoom_label.run_if(resource_changed::<UiScale>),
@@ -244,7 +257,8 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
             // Everything but the overlays scrolls, zoomed in.
             Node {
                 width: percent(100),
-                height: percent(100),
+                flex_grow: 1.0,
+                min_height: px(0),
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
@@ -338,6 +352,16 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                 HandsRoot
                 --
                 @flex_spacer()
+            ]
+            --
+            Node {
+                padding: UiRect::axes(px(14), px(5)),
+                margin: UiRect::bottom(px(6)),
+                border_radius: BorderRadius::all(px(8)),
+            }
+            ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+            Children [
+                @label_dim("") ActionsText
             ]
             --
             @help_overlay()
@@ -894,6 +918,18 @@ fn stats_bar() -> impl Scene {
         TypingOnly
         Children [
             @label("") LiveStats
+            --
+            Node {
+                display: Display::None,
+                flex_direction: FlexDirection::Row,
+                column_gap: px(18),
+            }
+            TrendRow
+            Children [
+                Text("") TrendText(0) --
+                Text("") TrendText(1) --
+                Text("") TrendText(2)
+            ]
             --
             Node {
                 width: percent(100),
@@ -1532,25 +1568,18 @@ fn update_message(
     let text = if !progress.mode.is_typing() {
         drill.summary.clone()
     } else if exercise.tutor.query == TutorQuery::End {
-        let results = exercise.tutor.results.unwrap_or(crate::klavaro::tutor::Results {
-            accuracy: 0.0,
-            velocity: 0.0,
-            fluidness: 0.0,
-            elapsed: 0.0,
-            n_touchs: 0,
-            n_errors: 0,
-        });
-        let mut keys = match exercise.mode {
-            ExerciseMode::Basic => "Enter: next exercise · Backspace: previous lesson".to_string(),
-            _ => "Enter: next exercise".to_string(),
-        };
-        if let Some((finger, reason)) = &exercise.suggestion {
-            keys = format!("{} · Tab: {} drill · {keys}", capitalize(reason), finger_name(*finger));
+        // The numbers are in the bar at the top, the keys in the bar at the bottom: the comment
+        // only, without its instructions.
+        let mut lines: Vec<String> = exercise
+            .message
+            .lines()
+            .filter(|l| !l.contains("Press Enter") && !l.contains("Backspace"))
+            .map(str::to_string)
+            .collect();
+        if let Some((_, reason)) = &exercise.suggestion {
+            lines.push(capitalize(reason));
         }
-        format!(
-            "{:.1} WPM · fluidness {:.0}%\n{}\n{keys}",
-            results.velocity, results.fluidness, exercise.message
-        )
+        lines.join("\n")
     } else {
         String::new()
     };
@@ -1558,6 +1587,105 @@ fn update_message(
         if label.0 != text {
             label.0.clone_from(&text);
         }
+    }
+}
+
+/// ▲ better than the last time of the lesson, ▼ worse, ● the same, in words too.
+fn update_trends(
+    exercise: Res<Exercise>,
+    theme: Res<bevy::feathers::theme::UiTheme>,
+    asset_server: Res<AssetServer>,
+    mut rows: Query<&mut Node, With<TrendRow>>,
+    mut texts: Query<(&TrendText, &mut Text, &mut TextColor, &mut TextFont)>,
+) {
+    if !exercise.is_changed() {
+        return;
+    }
+    let trend = exercise.trend.filter(|_| exercise.tutor.query == TutorQuery::End && exercise.mode.is_typing());
+    for mut row in &mut rows {
+        row.display = if trend.is_some() { Display::Flex } else { Display::None };
+    }
+    let Some(trend) = trend else {
+        return;
+    };
+    for (TrendText(i), mut text, mut color, mut font) in &mut texts {
+        let diff = trend[*i];
+        let (name, unit, same) = [("WPM", "", 0.5), ("accuracy", "%", 0.5), ("fluidness", "%", 0.5)][*i];
+        let (mark, token) = if diff > same {
+            ("▲", tokens::CHAR_CORRECT)
+        } else if diff < -same {
+            ("▼", tokens::CHAR_WRONG)
+        } else {
+            ("●", tokens::NEAR_MISS)
+        };
+        text.0 = format!("{mark} {name} {diff:+.1}{unit}");
+        color.0 = theme.color(&token);
+        font.font = bevy::text::FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::MONO));
+        font.font_size = FontSize::Px(13.0);
+    }
+}
+
+/// The keys of the moment, at the bottom.
+fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<Drill>, mut labels: Query<&mut Text, With<ActionsText>>) {
+    if !exercise.is_changed() && !progress.is_changed() && !drill.is_changed() {
+        return;
+    }
+    let ended = exercise.tutor.query == TutorQuery::End;
+    let mut actions: Vec<String> = Vec::new();
+    match progress.mode {
+        ExerciseMode::Hanzi => {
+            actions.push("Space listen".into());
+            actions.push("Enter next level, once done".into());
+            actions.push("← → levels".into());
+        }
+        ExerciseMode::Shortcuts => {
+            actions.push(if drill.finished.is_some() { "Enter another round".into() } else { "Esc, the arrows and the shortcuts are the drill".into() });
+        }
+        _ if ended => {
+            actions.push("Enter next exercise".into());
+            if exercise.mode == ExerciseMode::Basic {
+                actions.push("Backspace previous lesson".into());
+            }
+            if let Some((finger, _)) = &exercise.suggestion {
+                actions.push(format!("Tab {} drill", finger_name(*finger)));
+            }
+            actions.push("← → lessons".into());
+        }
+        _ => {
+            actions.push("← → lessons".into());
+            actions.push("Ctrl+Backspace clear the errors".into());
+        }
+    }
+    actions.push("F1 help".into());
+    let text = actions.join("   ·   ");
+    for mut label in &mut labels {
+        if label.0 != text {
+            label.0.clone_from(&text);
+        }
+    }
+}
+
+/// ← and → change the lesson, the finger, the hand or the hanzi level, not in the shortcuts:
+/// the arrows are part of the drill.
+fn arrow_lessons(
+    mut keys: MessageReader<crate::game::KeyPressed>,
+    mut progress: ResMut<Progress>,
+    layout: Res<ActiveLayout>,
+    panel: Res<Panel>,
+    mut new_exercise: MessageWriter<NewExercise>,
+) {
+    use crate::layout::{Chord, Special};
+    for key in keys.read() {
+        if progress.mode == ExerciseMode::Shortcuts || *panel != Panel::None {
+            continue;
+        }
+        let delta = match key.chord {
+            Some(c) if c == Chord::special(Special::Left) => -1,
+            Some(c) if c == Chord::special(Special::Right) => 1,
+            _ => continue,
+        };
+        change_lesson(&mut progress, &layout.0, delta);
+        new_exercise.write_default();
     }
 }
 

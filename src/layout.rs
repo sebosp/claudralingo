@@ -12,6 +12,8 @@ use crate::klavaro::{BACKSPACE, KbdGrid, UPSYM};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum LayoutId {
     QwertyUs,
+    /// The QWERTY of a laptop: no navigation block, no arrows, no numpad.
+    QwertyLaptop,
     #[default]
     Corne36,
     Corne42,
@@ -21,12 +23,19 @@ pub enum LayoutId {
 }
 
 impl LayoutId {
-    pub const ALL: [LayoutId; 5] =
-        [LayoutId::QwertyUs, LayoutId::Corne36, LayoutId::Corne42, LayoutId::Lily58, LayoutId::Custom];
+    pub const ALL: [LayoutId; 6] = [
+        LayoutId::QwertyUs,
+        LayoutId::QwertyLaptop,
+        LayoutId::Corne36,
+        LayoutId::Corne42,
+        LayoutId::Lily58,
+        LayoutId::Custom,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             LayoutId::QwertyUs => "QWERTY (US)",
+            LayoutId::QwertyLaptop => "QWERTY laptop (US)",
             LayoutId::Corne36 => "Corne 3x5+3",
             LayoutId::Corne42 => "Corne 3x6+3",
             LayoutId::Lily58 => "Lily58",
@@ -38,6 +47,7 @@ impl LayoutId {
     pub fn key(self) -> &'static str {
         match self {
             LayoutId::QwertyUs => "qwerty_us",
+            LayoutId::QwertyLaptop => "qwerty_laptop",
             LayoutId::Corne36 => "corne_3x5_3",
             LayoutId::Corne42 => "corne_3x6_3",
             LayoutId::Lily58 => "lily58",
@@ -48,6 +58,7 @@ impl LayoutId {
     pub fn build(self) -> Layout {
         match self {
             LayoutId::QwertyUs => qwerty(&KbdGrid::qwerty_us()),
+            LayoutId::QwertyLaptop => qwerty_laptop(),
             LayoutId::Corne36 => corne36(),
             LayoutId::Corne42 => corne42(),
             LayoutId::Lily58 => lily58(),
@@ -762,6 +773,16 @@ const QWERTY_FINGERS: [[u8; 14]; 4] = [
 
 /// A row staggered keyboard from the 4x14 grid of a Klavaro `.kbd` file, with the escape key,
 /// the modifiers and the navigation keys of a full size keyboard.
+/// The QWERTY without the navigation block and the arrows, as on a laptop.
+pub fn qwerty_laptop() -> Layout {
+    let mut layout = qwerty(&KbdGrid::qwerty_us());
+    let main = layout.blocks[0].keys.len();
+    layout.keys.truncate(main);
+    layout.blocks.truncate(1);
+    layout.id = LayoutId::QwertyLaptop;
+    layout
+}
+
 pub fn qwerty(grid: &KbdGrid) -> Layout {
     let mut keys = Vec::new();
     let mut rows: Vec<Vec<usize>> = Vec::new();
@@ -1142,6 +1163,12 @@ mod tests {
         for id in LayoutId::ALL {
             let layout = id.build();
             for s in [Escape, Tab, Left, Right, Up, Down, Backspace, Enter, Space] {
+                // A laptop without arrows: the shortcuts skip them.
+                let arrow = matches!(s, Left | Right | Up | Down);
+                if arrow && id == LayoutId::QwertyLaptop {
+                    assert!(layout.locate_special(s).is_none());
+                    continue;
+                }
                 assert!(layout.locate_special(s).is_some(), "{s:?} on {id:?}");
             }
             for m in [Ctrl, Alt, Super] {

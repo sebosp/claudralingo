@@ -46,6 +46,9 @@ pub struct Exercise {
     pub suggestion: Option<(u8, String)>,
     /// The most missed characters of a failed exercise, red on the keyboard until the next one.
     pub review: Vec<char>,
+    /// The words per minute, the accuracy and the fluidness against the last time of the same
+    /// lesson, the differences.
+    pub trend: Option<[f64; 3]>,
 }
 
 /// The accuracy to pass an exercise, Klavaro's goals: the basic course unlocks the next lesson
@@ -250,6 +253,7 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         message: String::new(),
         suggestion: None,
         review: Vec::new(),
+        trend: None,
     }
 }
 
@@ -606,6 +610,32 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         exercise.message.push_str(&format!("\nLayer lesson {} unlocked.", exercise.lesson + 1));
     }
     let n_layer_lessons = crate::course::layer_lessons(layout).len().max(1);
+    let lesson_key = match mode {
+        ExerciseMode::Basic | ExerciseMode::Layers => Some(exercise.lesson),
+        ExerciseMode::Fingers => Some(exercise.finger as usize),
+        _ => None,
+    };
+    // Against the earlier times of the same lesson: the trend, and a record.
+    {
+        let same: Vec<&Session> =
+            progress.current().sessions.iter().filter(|s| s.mode == mode && s.lesson == lesson_key).collect();
+        if let Some(last) = same.last() {
+            exercise.trend =
+                Some([results.velocity - last.velocity, results.accuracy - last.accuracy, results.fluidness - last.fluidness]);
+        }
+        if let Some(best) = same.iter().max_by(|a, b| a.velocity.total_cmp(&b.velocity))
+            && results.velocity > best.velocity
+            && results.velocity > 0.0
+        {
+            exercise.message = format!(
+                "New record! {:.1} WPM faster than your best of {:.1} WPM, on {}.\n{}",
+                results.velocity - best.velocity,
+                best.velocity,
+                crate::stats::short_date(best.finished_at),
+                exercise.message
+            );
+        }
+    }
     let current = progress.current();
     if mode == ExerciseMode::Basic && results.accuracy >= klavaro::basic::GOAL_ACCURACY {
         current.basic_lesson = (exercise.lesson + 1).min(N_BASIC_LESSONS);
@@ -619,11 +649,7 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
     if may_log {
         current.sessions.push(Session {
             mode,
-            lesson: match mode {
-                ExerciseMode::Basic | ExerciseMode::Layers => Some(exercise.lesson),
-                ExerciseMode::Fingers => Some(exercise.finger as usize),
-                _ => None,
-            },
+            lesson: lesson_key,
             accuracy: results.accuracy,
             velocity: results.velocity,
             fluidness: results.fluidness,

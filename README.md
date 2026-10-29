@@ -183,9 +183,19 @@ keymap away, see `corne36` in `src/layout.rs`.
   "Are you a bot?"), a line with one slip clears in orange ("Almost!", "So close!"); a miss
   streams lines out of the finger that should have pressed the key, in its color.
 
+## At the end of an exercise
+
+A wrong key keeps the cursor on its character, red until it is typed right: one miss does not
+mark the rest of the word, and it counts as one error. At the end, the bar at the top shows the
+words per minute, the accuracy and the fluidness, with ▲ (better), ▼ (worse) or ● (the same)
+against the last time of the same lesson; a new best speed for the lesson is congratulated with
+the gain and the date of the previous record. The keys of the moment (Enter, Backspace, Tab,
+← → for the lessons) are in the bar at the bottom.
+
 ## Keyboards
 
-The Corne 3x5+3 has the Typeractive default keymap, the Corne 3x6+3 and the Lily58 the default
+"QWERTY laptop (US)" has no navigation block nor arrows. The Corne 3x5+3 has the Typeractive
+default keymap, the Corne 3x6+3 and the Lily58 the default
 keymaps of ZMK (`corne.keymap`, `lily58.keymap`). The fingers and the rows come from the physical
 layouts of ZMK. "My ZMK keymap": paste your `.keymap` file (Settings, Paste ZMK keymap) or drop
 it on the window; a keymap of 36, 42 or 58 keys takes the matching physical layout, it is kept

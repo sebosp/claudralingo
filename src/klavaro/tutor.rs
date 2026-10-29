@@ -74,6 +74,11 @@ pub struct Tutor {
     last_touch: f64,
     start: f64,
     pub results: Option<Results>,
+    /// A wrong key does not move the cursor: the same character is typed again, the rest of
+    /// a word is not marked wrong by one miss. Klavaro moves on and asks for backspace.
+    pub stop_on_error: bool,
+    /// The character at the cursor was missed, it counts as an error once typed right.
+    missed_here: bool,
 }
 
 impl Tutor {
@@ -92,7 +97,14 @@ impl Tutor {
             last_touch: 0.0,
             start: 0.0,
             results: None,
+            stop_on_error: true,
+            missed_here: false,
         }
+    }
+
+    /// Klavaro's way: a wrong key moves on, the errors are erased with backspace.
+    pub fn klavaro(text: &str) -> Self {
+        Tutor { stop_on_error: false, ..Tutor::new(text) }
     }
 
     pub fn current_char(&self) -> Option<char> {
@@ -176,6 +188,10 @@ impl Tutor {
         // Minimizing the line breaking bug.
         let user_chr = if user_chr == UPSYM && real_chr == ' ' { ' ' } else { user_chr };
 
+        if self.stop_on_error {
+            return self.eval_in_place(user_chr, real_chr, now, accur, grid);
+        }
+
         let outcome = if user_chr == real_chr && self.retro_pos == 0 {
             self.n_touchs += 1;
             let touch_time = now - self.last_touch;
@@ -212,6 +228,42 @@ impl Tutor {
         }
         // Test the end of the paragraph.
         if self.text[self.cursor] == '\n' && !self.advance() && self.retro_pos == 0 {
+            return Outcome::Finished;
+        }
+        outcome
+    }
+
+    /// A wrong key keeps the cursor on the character, red until it is typed right: then it is
+    /// one error, as a character fixed with backspace in Klavaro.
+    fn eval_in_place(&mut self, user_chr: char, real_chr: char, now: f64, accur: &mut Accuracy, grid: &KbdGrid) -> Outcome {
+        if user_chr != real_chr {
+            self.last_touch = now;
+            self.states[self.cursor] = CharState::Wrong;
+            let first = !self.missed_here;
+            if first {
+                self.missed_here = true;
+                accur.wrong(real_chr, grid);
+            }
+            return Outcome::Wrong { expected: real_chr, typed: user_chr, first };
+        }
+        self.n_touchs += 1;
+        let touch_time = now - self.last_touch;
+        self.touch_times.push(touch_time);
+        self.last_touch = now;
+        let outcome = if self.missed_here {
+            self.missed_here = false;
+            self.states[self.cursor] = CharState::Retouched;
+            self.n_errors += 1;
+            Outcome::Correct { expected: real_chr, touch_time: None }
+        } else {
+            self.states[self.cursor] = CharState::Correct;
+            accur.correct(real_chr, touch_time, grid);
+            Outcome::Correct { expected: real_chr, touch_time: Some(touch_time) }
+        };
+        if !self.advance() {
+            return Outcome::Finished;
+        }
+        if self.text[self.cursor] == '\n' && !self.advance() {
             return Outcome::Finished;
         }
         outcome
@@ -265,8 +317,25 @@ mod tests {
     }
 
     #[test]
-    fn backspace_erases_the_errors_and_retyped_chars_count() {
+    fn a_miss_keeps_the_cursor() {
         let mut tutor = Tutor::new("fj fj\u{b6}\n");
+        let mut accur = Accuracy::default();
+        let mut t = 0.0;
+        // j missed twice: the cursor waits on it, the rest of the word is not wrong.
+        type_str(&mut tutor, "fkk", &mut t, &mut accur);
+        assert_eq!(tutor.cursor, 1);
+        assert_eq!(tutor.states[1], CharState::Wrong);
+        assert_eq!(tutor.states[2], CharState::Untouched);
+        type_str(&mut tutor, "j fj\u{b6}", &mut t, &mut accur);
+        assert_eq!(tutor.query, Query::End);
+        assert_eq!(tutor.states[1], CharState::Retouched);
+        // One error for the character, whatever the misses.
+        assert_eq!(tutor.n_errors, 1);
+    }
+
+    #[test]
+    fn backspace_erases_the_errors_and_retyped_chars_count() {
+        let mut tutor = Tutor::klavaro("fj fj\u{b6}\n");
         let mut accur = Accuracy::default();
         let mut t = 0.0;
         type_str(&mut tutor, "fk", &mut t, &mut accur);
