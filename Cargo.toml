@@ -7,6 +7,10 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 description = "A touch typing tutor in Bevy, Chinese hanzi calligraphy later"
 
+[workspace]
+# The Android and iOS app, `mobile/`.
+members = [".", "mobile"]
+
 [dependencies]
 # No "bevy/dynamic_linking" here: the release binaries are copied to portia-zt, the `dynamic`
 # feature (`cargo dev`) is for the local runs only.
@@ -16,8 +20,8 @@ bevy = { version = "0.20.0", default-features = false, features = [
     # The words of the hanzi mode, see assets/hanzi.
     "bevy_audio",
     "mp3",
-    # Paste a keymap of ZMK, see `crate::ui`.
-    "system_clipboard",
+    # Paste a keymap of ZMK, see `crate::ui`; the system clipboard on the desktops below.
+    "bevy_clipboard",
 ] }
 fastrand = "2.3"
 serde = { version = "1.0", features = ["derive"] }
@@ -28,6 +32,9 @@ log = { version = "0.4", features = [
 ] }
 tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
 inputx-pinyin = { version = "1.4.0", default-features = false }
+
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))'.dependencies]
+bevy = { version = "0.20.0", default-features = false, features = ["system_clipboard"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 fastrand = { version = "2.3", features = ["js"] }

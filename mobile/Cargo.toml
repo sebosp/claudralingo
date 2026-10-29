@@ -1,0 +1,41 @@
+[package]
+name = "claudralingo_mobile"
+# cargo-apk needs a version.
+version = "0.1.0"
+edition = "2024"
+description = "Claudralingo on Android and iOS"
+publish = false
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "claudralingo_mobile"
+# The shared library loaded by the Android activity; the iOS app is the binary.
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "claudralingo_mobile"
+path = "src/main.rs"
+
+[dependencies]
+claudralingo = { path = ".." }
+bevy = { version = "0.20.0", default-features = false, features = ["ui", "bevy_feathers"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.20.0", default-features = false, features = ["android-native-activity"] }
+
+[package.metadata.android]
+package = "io.github.sebosp.claudralingo"
+apk_name = "claudralingo"
+# The debug symbols out: the APK is much smaller.
+strip = "strip"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "Claudralingo"
+
+[package.metadata.android.application.activity]
+orientation = "landscape"

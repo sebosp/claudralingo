@@ -388,6 +388,16 @@ mod storage {
     use bevy::prelude::*;
 
     pub fn config_dir() -> Option<PathBuf> {
+        // The private storage of the app.
+        #[cfg(target_os = "android")]
+        {
+            return bevy::android::ANDROID_APP.get().and_then(|app| app.internal_data_path());
+        }
+        #[cfg(target_os = "ios")]
+        {
+            return std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/claudralingo"));
+        }
+        #[allow(unreachable_code)]
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
