@@ -29,6 +29,10 @@ pub struct ShortcutsRoot;
 #[derive(Component, Default, Clone)]
 pub struct KeyboardRoot;
 
+/// The hands under the keyboard, see [`crate::hands`].
+#[derive(Component, Default, Clone)]
+pub struct HandsRoot;
+
 /// The instructions of the layer trainer, above the keyboard.
 #[derive(Component, Default, Clone)]
 pub struct TrainerHint;
@@ -116,41 +120,49 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
             --
             @stats_bar()
             --
+            // The text, the shortcuts or the results, in the same place.
             Node {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Start,
-                min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
-                margin: UiRect::top(px(6)),
-            }
-            PromptRoot
-            --
-            Node {
-                display: Display::None,
-                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                row_gap: px(6),
+                justify_content: JustifyContent::Center,
+                row_gap: px(10),
                 min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
                 margin: UiRect::top(px(6)),
             }
-            ShortcutsRoot
-            --
-            @label("") MessageText
-            Node {
-                min_height: px(64),
-            }
-            TextLayout {
-                justify: Justify::Center,
-            }
-            --
-            @FeathersButton {
-                @caption: bsn! { @caption("") SuggestCaption }
-            }
-            SuggestButton
-            Node {
-                display: Display::None,
-            }
-            on(train_suggested_finger)
+            Children [
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Start,
+                }
+                PromptRoot
+                --
+                Node {
+                    display: Display::None,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(6),
+                }
+                ShortcutsRoot
+                --
+                @label("") MessageText
+                Node {
+                    display: Display::None,
+                }
+                TextLayout {
+                    justify: Justify::Center,
+                }
+                --
+                @FeathersButton {
+                    @caption: bsn! { @caption("") SuggestCaption }
+                }
+                SuggestButton
+                Node {
+                    display: Display::None,
+                }
+                on(train_suggested_finger)
+            ]
             --
             @label("") TrainerHint
             Node {
@@ -166,6 +178,14 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
                 padding: px(8),
             }
             KeyboardRoot
+            --
+            Node {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::End,
+            }
+            HandsRoot
             --
             @flex_spacer()
             --
@@ -475,23 +495,31 @@ fn display_char(c: char) -> String {
     }
 }
 
-/// The text of the typing exercises or the tasks of the shortcuts.
+/// The text of the typing exercises or the tasks of the shortcuts, the results at the end.
 fn show_mode_views(
     progress: Res<Progress>,
-    mut prompts: Query<&mut Node, (With<PromptRoot>, Without<ShortcutsRoot>)>,
-    mut shortcuts: Query<&mut Node, With<ShortcutsRoot>>,
+    exercise: Res<Exercise>,
+    drill: Res<Drill>,
+    mut prompts: Query<&mut Node, (With<PromptRoot>, Without<ShortcutsRoot>, Without<MessageText>)>,
+    mut shortcuts: Query<&mut Node, (With<ShortcutsRoot>, Without<MessageText>)>,
+    mut messages: Query<&mut Node, With<MessageText>>,
 ) {
     let typing = progress.mode.is_typing();
+    let ended = if typing { exercise.tutor.query == TutorQuery::End } else { drill.finished.is_some() };
     let show = |visible: bool| if visible { Display::Flex } else { Display::None };
-    for mut node in &mut prompts {
-        if node.display != show(typing) {
-            node.display = show(typing);
+    let set = |node: &mut Node, visible: bool| {
+        if node.display != show(visible) {
+            node.display = show(visible);
         }
+    };
+    for mut node in &mut prompts {
+        set(&mut node, typing && !ended);
     }
     for mut node in &mut shortcuts {
-        if node.display != show(!typing) {
-            node.display = show(!typing);
-        }
+        set(&mut node, !typing && !ended);
+    }
+    for mut node in &mut messages {
+        set(&mut node, ended);
     }
 }
 

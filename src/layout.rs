@@ -694,7 +694,8 @@ pub fn corne36() -> Layout {
             row.push(keys.len() - 1);
         }
         rows.push((if half == 0 { 2.2 } else { -0.2 }, row));
-        blocks.push(Block { rows, tilt: if half == 0 { 4.0 } else { -4.0 } });
+        // No tilt: the rotated nodes of bevy_ui have jagged edges, and the real halves are straight.
+        blocks.push(Block { rows, tilt: 0.0 });
     }
     Layout {
         id: LayoutId::Corne36,

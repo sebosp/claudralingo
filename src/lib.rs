@@ -5,6 +5,7 @@ use bevy::prelude::*;
 pub mod drills;
 pub mod effects;
 pub mod game;
+pub mod hands;
 pub mod keyboard;
 pub mod klavaro;
 pub mod layout;
@@ -25,6 +26,7 @@ impl Plugin for ClaudralingoPlugin {
             ui::UiPlugin,
             prompt::PromptPlugin,
             keyboard::KeyboardPlugin,
+            hands::HandsPlugin,
             effects::EffectsPlugin,
             shortcuts::ShortcutsPlugin,
         ));

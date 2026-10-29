@@ -47,7 +47,10 @@ are the same for both layouts: on the Corne the digits and most symbols are on t
 
 The next key is green, the shift to hold purple, the layer and the modifier keys to hold amber
 (with the legends of that layer), backspace red while there are errors to erase. The stripe at
-the bottom of each key is the finger that types it.
+the bottom of each key is the finger that types it. The hands under the keyboard have the same
+colors: the finger of the next key lifts and glows, the fingers holding a shift, a layer or a
+modifier key are outlined in amber. The keys are not rotated, bevy_ui draws the edges of rotated
+nodes without anti-aliasing.
 
 - **Fade legends** (on by default): every exercise starts with the legends and the hints shown,
   they fade out over the first 20 correct keys, only the layout and the finger colors stay. A
