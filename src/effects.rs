@@ -6,9 +6,9 @@ use std::f32::consts::TAU;
 use bevy::feathers::theme::UiTheme;
 use bevy::prelude::*;
 
-use crate::game::{ActiveLayout, Exercise, Touched};
+use crate::game::{Exercise, TouchResult, Touched};
 use crate::keyboard::{KeyCap, KeyRole, KeyboardView};
-use crate::klavaro::tutor::{CharState, Outcome, Query as TutorQuery};
+use crate::klavaro::tutor::{CharState, Query as TutorQuery};
 use crate::prompt::PromptView;
 use crate::theme::tokens;
 use crate::ui::MessageText;
@@ -102,10 +102,8 @@ fn spawn_sparks(commands: &mut Commands, at: Vec2, color: Color, error: bool) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_touch(
     mut touches: MessageReader<Touched>,
-    layout: Res<ActiveLayout>,
     keyboard: Res<KeyboardView>,
     prompt: Res<PromptView>,
     exercise: Res<Exercise>,
@@ -114,42 +112,29 @@ fn on_touch(
     mut commands: Commands,
 ) {
     for touch in touches.read() {
-        let key_of = |c: char| {
-            layout
-                .0
-                .locate(c)
-                .and_then(|location| keyboard.keys.get(location.key))
-                .map(|(node, _)| *node)
-        };
-        if let Some(key) = key_of(touch.typed) {
+        if let Some(key) = touch.pressed.and_then(|k| keyboard.node(k)) {
             commands.entity(key).insert(Pressed { age: 0.0 });
         }
-        match touch.outcome {
-            Outcome::Correct { expected, .. } => {
-                if let Some(key) = key_of(expected)
-                    && let Ok((transform, node)) = nodes.get(key)
-                {
-                    let color = theme.color(&tokens::SPARK_OK);
-                    spawn_sparks(&mut commands, center(transform, node), color, false);
-                }
-            }
-            Outcome::Wrong { expected, .. } => {
-                if let Some(key) = key_of(expected)
-                    && let Ok((transform, node)) = nodes.get(key)
-                {
-                    let color = theme.color(&tokens::SPARK_ERROR);
-                    spawn_sparks(&mut commands, center(transform, node), color, true);
-                }
-                // The wrong character is the last one before the cursor.
-                let tutor = &exercise.tutor;
-                let wrong = (0..=tutor.cursor.min(tutor.states.len().saturating_sub(1)))
-                    .rev()
-                    .find(|i| tutor.states[*i] == CharState::Wrong);
-                if let Some(entity) = wrong.and_then(|i| prompt.char_entity(i)) {
-                    commands.entity(entity).insert(Shake { age: 0.0 });
-                }
-            }
-            _ => {}
+        let (token, error) = match touch.result {
+            TouchResult::Ok => (tokens::SPARK_OK, false),
+            TouchResult::Wrong => (tokens::SPARK_ERROR, true),
+            TouchResult::Other => continue,
+        };
+        if let Some(key) = touch.expected.and_then(|k| keyboard.node(k))
+            && let Ok((transform, node)) = nodes.get(key)
+        {
+            spawn_sparks(&mut commands, center(transform, node), theme.color(&token), error);
+        }
+        if !touch.shake || exercise.tutor.states.is_empty() {
+            continue;
+        }
+        // The wrong character is the last one before the cursor.
+        let tutor = &exercise.tutor;
+        let wrong = (0..=tutor.cursor.min(tutor.states.len() - 1))
+            .rev()
+            .find(|i| tutor.states[*i] == CharState::Wrong);
+        if let Some(entity) = wrong.and_then(|i| prompt.char_entity(i)) {
+            commands.entity(entity).insert(Shake { age: 0.0 });
         }
     }
 }

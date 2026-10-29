@@ -22,14 +22,20 @@ pub enum ExerciseMode {
     Adaptability,
     Velocity,
     Fluidness,
+    /// The keys of one finger, up and down its column.
+    Fingers,
+    /// Escape, the arrows, the numbers, the symbols and the Ctrl and Alt shortcuts.
+    Shortcuts,
 }
 
 impl ExerciseMode {
-    pub const ALL: [ExerciseMode; 4] = [
+    pub const ALL: [ExerciseMode; 6] = [
         ExerciseMode::Basic,
         ExerciseMode::Adaptability,
         ExerciseMode::Velocity,
         ExerciseMode::Fluidness,
+        ExerciseMode::Fingers,
+        ExerciseMode::Shortcuts,
     ];
 
     pub fn name(self) -> &'static str {
@@ -38,7 +44,14 @@ impl ExerciseMode {
             ExerciseMode::Adaptability => "Adaptability",
             ExerciseMode::Velocity => "Velocity",
             ExerciseMode::Fluidness => "Fluidness",
+            ExerciseMode::Fingers => "Finger drill",
+            ExerciseMode::Shortcuts => "Shortcuts & keys",
         }
+    }
+
+    /// The exercises with a text typed through the Klavaro tutor.
+    pub fn is_typing(self) -> bool {
+        self != ExerciseMode::Shortcuts
     }
 }
 
@@ -87,6 +100,12 @@ pub struct LayoutProgress {
     /// Klavaro's accumulators, they drive the adaptability exercises.
     pub klavaro: Accuracy,
     pub sessions: Vec<Session>,
+    /// The finger of the finger drill, 1 is the left pinky, 5 the thumbs, 9 the right pinky.
+    pub finger: u8,
+    /// Per chord of the shortcuts exercise, like `Ctrl+C`, the times to press it.
+    pub shortcuts: BTreeMap<String, KeyStats>,
+    /// The fastest Alt+Tab round trip, in seconds.
+    pub alt_tab_best: Option<f64>,
 }
 
 impl Default for LayoutProgress {
@@ -98,6 +117,9 @@ impl Default for LayoutProgress {
             most_missed: Vec::new(),
             klavaro: Accuracy::default(),
             sessions: Vec::new(),
+            finger: 4,
+            shortcuts: BTreeMap::new(),
+            alt_tab_best: None,
         }
     }
 }
@@ -123,15 +145,49 @@ impl LayoutProgress {
         missed.sort_by(|a, b| b.1.misses.cmp(&a.1.misses).then(a.1.accuracy().total_cmp(&b.1.accuracy())));
         self.most_missed = missed.iter().take(N_RANKED_KEYS).map(|(k, _)| (*k).clone()).collect();
     }
+
+    /// The accuracy of every finger with enough touches, from the per key statistics.
+    pub fn finger_accuracy(&self, finger_of: impl Fn(char) -> Option<u8>) -> Vec<(u8, f64)> {
+        let mut fingers: BTreeMap<u8, (u64, u64)> = BTreeMap::new();
+        for (key, stats) in &self.keys {
+            if let Some(finger) = key.chars().next().and_then(&finger_of) {
+                let entry = fingers.entry(finger).or_default();
+                entry.0 += stats.hits;
+                entry.1 += stats.misses;
+            }
+        }
+        fingers
+            .into_iter()
+            .filter(|(_, (hits, misses))| hits + misses >= MIN_TOUCHES_TO_RANK)
+            .map(|(finger, (hits, misses))| (finger, 100.0 * hits as f64 / (hits + misses) as f64))
+            .collect()
+    }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Resource)]
+#[derive(Debug, Clone, Serialize, Deserialize, Resource)]
 #[serde(default)]
 pub struct Progress {
     pub theme: ThemeMode,
     pub layout: LayoutId,
     pub mode: ExerciseMode,
+    /// The legends of the keys fade out while typing, they come back on errors.
+    pub fade_legends: bool,
+    /// Shows the layer and modifier keys to hold for the characters of the other layers.
+    pub layer_trainer: bool,
     pub layouts: BTreeMap<String, LayoutProgress>,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Progress {
+            theme: ThemeMode::default(),
+            layout: LayoutId::default(),
+            mode: ExerciseMode::default(),
+            fade_legends: true,
+            layer_trainer: true,
+            layouts: BTreeMap::new(),
+        }
+    }
 }
 
 impl Progress {
@@ -259,5 +315,10 @@ mod tests {
         let mut back: Progress = serde_json::from_str(&json).unwrap();
         assert_eq!(back.current().key('x').misses, 3);
         assert_eq!(back.theme, ThemeMode::Dark);
+        assert!(back.fade_legends && back.layer_trainer);
+        // The files saved before the settings existed.
+        let old: Progress = serde_json::from_str(r#"{"theme":"Light","layouts":{}}"#).unwrap();
+        assert!(old.fade_legends);
+        assert_eq!(old.theme, ThemeMode::Light);
     }
 }

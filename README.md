@@ -17,14 +17,16 @@ A typing tutor made with [Bevy](https://bevyengine.org) 0.20 and its
 
 ## Touch typing
 
-The four Klavaro exercises, with their original texts and goals:
+The four Klavaro exercises, with their original texts and goals, and two of Claudralingo:
 
-| Exercise     | Text                                                     | Goal                               |
-| ------------ | -------------------------------------------------------- | ---------------------------------- |
-| Basic course | 43 lessons of random 5-letter "words" of a few keys      | 95% accuracy to unlock the next    |
-| Adaptability | random weird words, made of your worst keys when needed  | 98% accuracy                       |
-| Velocity     | random words of Klavaro's dictionary                     | 95% accuracy, 50 WPM               |
-| Fluidness    | paragraphs of a text                                     | 97% accuracy, 50 WPM, 70% fluidity |
+| Exercise         | Text                                                       | Goal                               |
+| ---------------- | ---------------------------------------------------------- | ---------------------------------- |
+| Basic course     | 43 lessons of random 5-letter "words" of a few keys        | 95% accuracy to unlock the next    |
+| Adaptability     | random weird words, made of your worst keys when needed    | 98% accuracy                       |
+| Velocity         | random words of Klavaro's dictionary                       | 95% accuracy, 50 WPM               |
+| Fluidness        | paragraphs of a text                                       | 97% accuracy, 50 WPM, 70% fluidity |
+| Finger drill     | the keys of one finger, up and down its column             | 95% accuracy                       |
+| Shortcuts & keys | Esc, editing shortcuts, arrows, numbers, symbols, Alt+Tab  | every key on the first try         |
 
 Differences to Klavaro:
 
@@ -39,14 +41,61 @@ Differences to Klavaro:
   Klavaro.
 
 The basic lessons are masks over the 4x14 key grid of Klavaro's `qwerty_us.kbd`, their characters
-are the same for both layouts: on the Corne the digits and most symbols are on the layers. The
-on-screen keyboard shows the next key in green, the shift to hold in purple, the layer key to hold
-in amber (and the legends of that layer), and backspace in red while there are errors to erase.
-The stripe at the bottom of each key is the finger that types it.
+are the same for both layouts: on the Corne the digits and most symbols are on the layers.
 
-The Corne keymap is a placeholder until it matches the real one: QWERTY on the base layer,
-`Shift Lower Space` on the left thumbs, `Enter Raise Backspace` on the right ones, digits and
-shifted digits on Lower, brackets on Raise. See `corne36` in `src/layout.rs`.
+### The keyboard on the screen
+
+The next key is green, the shift to hold purple, the layer and the modifier keys to hold amber
+(with the legends of that layer), backspace red while there are errors to erase. The stripe at
+the bottom of each key is the finger that types it.
+
+- **Fade legends** (on by default): every exercise starts with the legends and the hints shown,
+  they fade out over the first 20 correct keys, only the layout and the finger colors stay. A
+  wrong key, or a pause of 2 seconds, shows the next key again, green and with its legend, until
+  it is typed. That is the way to learn a new layout (Dvorak, Colemak, a Corne keymap): from
+  memory, with help only when stuck.
+- **Layer trainer** (on by default): a character of another layer, or a chord with Ctrl, Alt or
+  Super, always shows the keys to hold and the key to press, with the instructions above the
+  keyboard, i.e. "Hold Lower (left thumb), then press ! where A is (left pinky, home row)".
+
+### Finger drills
+
+One drill per finger, ‹ and › pick the finger: the pinky goes up and down its column (q a z), the
+index fingers also move sideways between their two columns, the thumbs drill is short words
+between Space and Enter. At the end of the other exercises, a key missed 3 times or more, or a
+finger below 92% accuracy over all the exercises, suggests the drill of that finger: Tab or the
+button starts it. The weakest fingers are listed under the keyboard.
+
+### Shortcuts & keys
+
+A round of 21 tasks, each one a key or a chord to press, with the keys to hold shown on the
+keyboard (the shift of the symbols is part of the symbol):
+
+- Esc;
+- a line of text with a cursor, where the shortcuts do what they do in an editor: Home, Ctrl+→,
+  Ctrl+Shift+→ to select a word, Ctrl+C, End, Ctrl+V, Ctrl+Z, Ctrl+Shift+←, Ctrl+X,
+  Ctrl+Backspace, Backspace, Ctrl+A, Delete;
+- the arrows, the ten digits and ten random symbols, like `. / @ # $ % ^ & * ( ) { } ? + = \ -`,
+  in a random order;
+- Tab and Shift+Tab;
+- Alt+Tab to another window and back: the window notices that it lost the focus with Alt held,
+  and times the round trip until it has the focus again. The best round trip is saved.
+
+A wrong chord changes nothing, it counts as a miss of the task and the chord is shown again.
+
+### The Corne keymap
+
+The Corne keymap is a placeholder until it matches the real one:
+
+- Base: QWERTY, home row mods Super, Alt, Ctrl on A S D and ; L K;
+- thumbs: `Shift Lower Space` on the left, `Enter Raise Backspace` on the right;
+- Lower: digits on the top row, shifted digits on the home row, `` ` ~ ' " \ `` and `| - _ = +`
+  on the bottom row;
+- Raise: `Esc Tab Home End Del` on the left top row, `[ ] { }` on the right top row, the arrows on
+  H J K L, `PgUp PgDn Ins` on N M ,.
+
+See `corne36` in `src/layout.rs`. The QWERTY layout has the usual touch typing fingers, the
+modifiers, Esc and the navigation keys.
 
 ## Progress
 
@@ -55,11 +104,13 @@ set), the browser to its `localStorage`. Per layout:
 
 - `keys`: the hits, misses and touch times of every character,
 - `best_keys` and `most_missed`: the rankings shown in the window,
-- `basic_lesson`, the finished exercises in `sessions`,
+- `basic_lesson`, the `finger` of the finger drill, the finished exercises in `sessions`,
+- `shortcuts`: the hits, misses and times of every chord of the shortcuts, `alt_tab_best`,
 - `klavaro`: Klavaro's own error and touch time accumulators (`accuracy.log` and
   `proficiency.log` in Klavaro), they generate the adaptability words.
 
-The theme (dark by default), the layout and the exercise are saved too.
+The theme (dark by default), the layout, the exercise, `fade_legends` and `layer_trainer` are
+saved too.
 
 ## Build
 
@@ -74,7 +125,8 @@ trunk build --release                    # browser, into dist/
 ```
 
 `CLAUDRALINGO_SCREENSHOT=shot.png CLAUDRALINGO_TYPE="fj fk<" cargo run` types the given keys
-(`<` is backspace) and saves a screenshot, to check the screen without a keyboard.
+(`<` is backspace, a tab is Tab, `*` presses the expected key or chord, and fakes the Alt+Tab
+round trip) and saves a screenshot, to check the screen without a keyboard.
 
 ## Credits and license
 

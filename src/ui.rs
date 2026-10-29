@@ -8,21 +8,30 @@ use bevy::feathers::tokens as feathers_tokens;
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
-use bevy::ui::Checked;
+use bevy::ui::{Checked, Selected};
 use bevy::ui_widgets::{Activate, ValueChange};
 
-use crate::game::{ActiveLayout, Exercise, NewExercise};
+use crate::drills::FINGERS;
+use crate::game::{ActiveLayout, Exercise, NewExercise, go_to_suggestion};
 use crate::klavaro::N_BASIC_LESSONS;
 use crate::klavaro::tutor::Query as TutorQuery;
-use crate::layout::LayoutId;
+use crate::layout::{LayoutId, finger_name};
 use crate::progress::{ExerciseMode, Progress};
+use crate::shortcuts::Drill;
 use crate::theme::{ThemeMode, tokens};
 
 #[derive(Component, Default, Clone)]
 pub struct PromptRoot;
 
 #[derive(Component, Default, Clone)]
+pub struct ShortcutsRoot;
+
+#[derive(Component, Default, Clone)]
 pub struct KeyboardRoot;
+
+/// The instructions of the layer trainer, above the keyboard.
+#[derive(Component, Default, Clone)]
+pub struct TrainerHint;
 
 #[derive(Component, Default, Clone)]
 struct LessonLabel;
@@ -40,7 +49,25 @@ pub struct MessageText;
 struct RankingText;
 
 #[derive(Component, Default, Clone)]
-struct DarkToggle;
+struct ModeSelect;
+
+/// The toggles and checkboxes of the settings, they start unchecked.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Setting {
+    #[default]
+    Dark,
+    FadeLegends,
+    LayerTrainer,
+}
+
+#[derive(Component, Default, Clone)]
+struct SettingControl(Setting);
+
+#[derive(Component, Default, Clone)]
+struct SuggestButton;
+
+#[derive(Component, Default, Clone)]
+struct SuggestCaption;
 
 pub struct UiPlugin;
 
@@ -49,12 +76,16 @@ impl Plugin for UiPlugin {
         app.add_systems(Startup, spawn_ui).add_systems(
             Update,
             (
-                init_dark_toggle,
+                init_settings,
+                sync_mode_select,
+                show_mode_views,
                 update_lesson_label,
                 update_live_stats,
                 update_message,
+                update_suggestion,
                 update_rankings.run_if(resource_changed::<Progress>),
-            ),
+            )
+                .after(crate::game::GameSystems),
         );
     }
 }
@@ -76,7 +107,7 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            row_gap: px(14),
+            row_gap: px(10),
         }
         TabGroup
         ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
@@ -90,17 +121,40 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Start,
                 min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
-                margin: UiRect::top(px(8)),
+                margin: UiRect::top(px(6)),
             }
             PromptRoot
             --
+            Node {
+                display: Display::None,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(6),
+                min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
+                margin: UiRect::top(px(6)),
+            }
+            ShortcutsRoot
+            --
             @label("") MessageText
             Node {
-                min_height: px(84),
-                margin: UiRect::bottom(px(8)),
+                min_height: px(64),
             }
             TextLayout {
                 justify: Justify::Center,
+            }
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("") SuggestCaption }
+            }
+            SuggestButton
+            Node {
+                display: Display::None,
+            }
+            on(train_suggested_finger)
+            --
+            @label("") TrainerHint
+            Node {
+                min_height: px(20),
             }
             --
             Node {
@@ -108,8 +162,8 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Start,
-                column_gap: px(56),
-                padding: px(12),
+                column_gap: px(48),
+                padding: px(8),
             }
             KeyboardRoot
             --
@@ -137,8 +191,9 @@ fn toolbar(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene
             @FeathersSelect {
                 @options: modes,
             }
+            ModeSelect
             Node {
-                min_width: px(150),
+                min_width: px(160),
             }
             on(on_mode_change)
             --
@@ -149,7 +204,7 @@ fn toolbar(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene
             --
             @label_dim("") LessonLabel
             Node {
-                min_width: px(220),
+                min_width: px(200),
             }
             --
             @FeathersButton {
@@ -165,21 +220,31 @@ fn toolbar(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene
             --
             @flex_spacer()
             --
-            @label_dim("Keyboard")
+            @FeathersCheckbox {
+                @caption: bsn! { @caption("Fade legends") }
+            }
+            SettingControl(Setting::FadeLegends)
+            on(on_setting_change)
+            --
+            @FeathersCheckbox {
+                @caption: bsn! { @caption("Layer trainer") }
+            }
+            SettingControl(Setting::LayerTrainer)
+            on(on_setting_change)
             --
             @FeathersSelect {
                 @options: layouts,
             }
             Node {
-                min_width: px(150),
+                min_width: px(140),
             }
             on(on_layout_change)
             --
             @label_dim("Dark")
             --
             @FeathersToggleSwitch
-            DarkToggle
-            on(on_dark_toggle)
+            SettingControl(Setting::Dark)
+            on(on_setting_change)
         ]
     }
 }
@@ -218,8 +283,8 @@ fn stats_bar() -> impl Scene {
 fn rankings() -> impl Scene {
     bsn! {
         Node {
-            width: px(760),
-            margin: UiRect::bottom(px(12)),
+            width: px(820),
+            margin: UiRect::bottom(px(10)),
         }
         Children [
             @group()
@@ -235,14 +300,20 @@ fn rankings() -> impl Scene {
     }
 }
 
-/// The toggle has no initial value prop, the dark mode is the default.
-fn init_dark_toggle(
-    toggles: Query<Entity, Added<DarkToggle>>,
-    mode: Res<ThemeMode>,
-    mut commands: Commands,
-) {
-    for entity in &toggles {
-        if *mode == ThemeMode::Dark {
+impl Setting {
+    fn get(self, progress: &Progress) -> bool {
+        match self {
+            Setting::Dark => progress.theme == ThemeMode::Dark,
+            Setting::FadeLegends => progress.fade_legends,
+            Setting::LayerTrainer => progress.layer_trainer,
+        }
+    }
+}
+
+/// The toggles and the checkboxes have no initial value prop.
+fn init_settings(settings: Query<(Entity, &SettingControl), Added<SettingControl>>, progress: Res<Progress>, mut commands: Commands) {
+    for (entity, SettingControl(setting)) in &settings {
+        if setting.get(&progress) {
             commands.entity(entity).insert(Checked);
         }
     }
@@ -254,21 +325,30 @@ fn release_focus(focus: &mut InputFocus) {
     focus.clear();
 }
 
-fn on_dark_toggle(
+fn on_setting_change(
     change: On<ValueChange<bool>>,
+    settings: Query<&SettingControl>,
     mut mode: ResMut<ThemeMode>,
     mut progress: ResMut<Progress>,
     mut focus: ResMut<InputFocus>,
     mut commands: Commands,
 ) {
+    let Ok(SettingControl(setting)) = settings.get(change.source) else {
+        return;
+    };
     if change.value {
         commands.entity(change.source).insert(Checked);
-        *mode = ThemeMode::Dark;
     } else {
         commands.entity(change.source).remove::<Checked>();
-        *mode = ThemeMode::Light;
     }
-    progress.theme = *mode;
+    match setting {
+        Setting::Dark => {
+            *mode = if change.value { ThemeMode::Dark } else { ThemeMode::Light };
+            progress.theme = *mode;
+        }
+        Setting::FadeLegends => progress.fade_legends = change.value,
+        Setting::LayerTrainer => progress.layer_trainer = change.value,
+    }
     progress.save();
     release_focus(&mut focus);
 }
@@ -288,6 +368,32 @@ fn on_mode_change(
         new_exercise.write_default();
     }
     release_focus(&mut focus);
+}
+
+/// The mode also changes from the keyboard and the buttons, the select follows.
+fn sync_mode_select(
+    progress: Res<Progress>,
+    selects: Query<Entity, With<ModeSelect>>,
+    children: Query<&Children>,
+    rows: Query<(&OptionIndex, Has<Selected>)>,
+    mut commands: Commands,
+) {
+    if !progress.is_changed() {
+        return;
+    }
+    let index = ExerciseMode::ALL.iter().position(|m| *m == progress.mode);
+    for select in &selects {
+        for row in children.iter_descendants(select) {
+            if let Ok((option, selected)) = rows.get(row) {
+                let wanted = Some(option.0) == index;
+                if wanted && !selected {
+                    commands.entity(row).insert(Selected);
+                } else if !wanted && selected {
+                    commands.entity(row).remove::<Selected>();
+                }
+            }
+        }
+    }
 }
 
 fn on_layout_change(
@@ -310,10 +416,17 @@ fn on_layout_change(
     release_focus(&mut focus);
 }
 
+/// ‹ and › change the finger in the finger drills, the basic lesson otherwise.
 fn change_lesson(progress: &mut Progress, delta: isize) {
-    let current = progress.current();
-    current.basic_lesson = current.basic_lesson.saturating_add_signed(delta).clamp(1, N_BASIC_LESSONS);
-    progress.mode = ExerciseMode::Basic;
+    if progress.mode == ExerciseMode::Fingers {
+        let current = progress.current();
+        let i = FINGERS.iter().position(|f| *f == current.finger).unwrap_or(0);
+        current.finger = FINGERS[(i as isize + delta).rem_euclid(FINGERS.len() as isize) as usize];
+    } else {
+        let current = progress.current();
+        current.basic_lesson = current.basic_lesson.saturating_add_signed(delta).clamp(1, N_BASIC_LESSONS);
+        progress.mode = ExerciseMode::Basic;
+    }
     progress.save();
 }
 
@@ -344,6 +457,17 @@ fn restart(_: On<Activate>, mut new_exercise: MessageWriter<NewExercise>, mut fo
     release_focus(&mut focus);
 }
 
+fn train_suggested_finger(
+    _: On<Activate>,
+    exercise: Res<Exercise>,
+    mut progress: ResMut<Progress>,
+    mut new_exercise: MessageWriter<NewExercise>,
+    mut focus: ResMut<InputFocus>,
+) {
+    go_to_suggestion(&exercise, &mut progress, &mut new_exercise);
+    release_focus(&mut focus);
+}
+
 fn display_char(c: char) -> String {
     match c {
         ' ' => "Space".into(),
@@ -351,8 +475,28 @@ fn display_char(c: char) -> String {
     }
 }
 
-fn update_lesson_label(exercise: Res<Exercise>, mut labels: Query<&mut Text, With<LessonLabel>>) {
-    if !exercise.is_changed() {
+/// The text of the typing exercises or the tasks of the shortcuts.
+fn show_mode_views(
+    progress: Res<Progress>,
+    mut prompts: Query<&mut Node, (With<PromptRoot>, Without<ShortcutsRoot>)>,
+    mut shortcuts: Query<&mut Node, With<ShortcutsRoot>>,
+) {
+    let typing = progress.mode.is_typing();
+    let show = |visible: bool| if visible { Display::Flex } else { Display::None };
+    for mut node in &mut prompts {
+        if node.display != show(typing) {
+            node.display = show(typing);
+        }
+    }
+    for mut node in &mut shortcuts {
+        if node.display != show(!typing) {
+            node.display = show(!typing);
+        }
+    }
+}
+
+fn update_lesson_label(exercise: Res<Exercise>, layout: Res<ActiveLayout>, mut labels: Query<&mut Text, With<LessonLabel>>) {
+    if !exercise.is_changed() && !layout.is_changed() {
         return;
     }
     let text = match exercise.mode {
@@ -363,52 +507,88 @@ fn update_lesson_label(exercise: Res<Exercise>, mut labels: Query<&mut Text, Wit
         ExerciseMode::Adaptability => "Random words, your errors first".into(),
         ExerciseMode::Velocity => "Random words of the dictionary".into(),
         ExerciseMode::Fluidness => "Paragraphs, backspace fixes errors".into(),
+        ExerciseMode::Fingers if exercise.finger == 5 => "Thumbs: Space and Enter".into(),
+        ExerciseMode::Fingers => {
+            let chars: Vec<String> = layout.0.finger_chars(exercise.finger).iter().map(|(c, _)| c.to_string()).collect();
+            format!("{}: {}", capitalize(finger_name(exercise.finger)), chars.join(" "))
+        }
+        ExerciseMode::Shortcuts => "Esc, arrows, Ctrl, Alt".into(),
     };
     for mut label in &mut labels {
         label.0.clone_from(&text);
     }
 }
 
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
 fn update_live_stats(
     exercise: Res<Exercise>,
+    drill: Res<Drill>,
+    progress: Res<Progress>,
     time: Res<Time<Real>>,
     mut labels: Query<&mut Text, With<LiveStats>>,
     mut bars: Query<&mut Node, With<ProgressBar>>,
 ) {
-    let tutor = &exercise.tutor;
-    let elapsed = tutor.elapsed(time.elapsed_secs_f64());
-    let correct = tutor.n_touchs.saturating_sub(tutor.n_errors);
-    let wpm = if elapsed > 0.5 { 12.0 * correct as f64 / elapsed } else { 0.0 };
-    let accuracy = if tutor.n_touchs > 0 {
-        100.0 * (1.0 - tutor.n_errors as f64 / tutor.n_touchs as f64)
+    let now = time.elapsed_secs_f64();
+    let (text, done) = if progress.mode.is_typing() {
+        let tutor = &exercise.tutor;
+        let elapsed = tutor.elapsed(now);
+        let correct = tutor.n_touchs.saturating_sub(tutor.n_errors);
+        let wpm = if elapsed > 0.5 { 12.0 * correct as f64 / elapsed } else { 0.0 };
+        let accuracy = if tutor.n_touchs > 0 {
+            100.0 * (1.0 - tutor.n_errors as f64 / tutor.n_touchs as f64)
+        } else {
+            100.0
+        };
+        let mut text = format!("{wpm:.0} wpm  ·  {accuracy:.0}%  ·  {elapsed:.0}s");
+        if let Some(results) = tutor.results {
+            text.push_str(&format!("  ·  fluidness {:.0}%", results.fluidness));
+        } else if tutor.query == TutorQuery::Start {
+            text = "Type the first character to start".into();
+        } else if tutor.retro_pos > 0 {
+            text.push_str("  ·  ⌫ fix the errors");
+        }
+        let progress = if tutor.text.is_empty() { 0.0 } else { 100.0 * tutor.cursor as f32 / tutor.text.len() as f32 };
+        (text, if tutor.query == TutorQuery::End { 100.0 } else { progress })
     } else {
-        100.0
+        let text = if drill.is_away() {
+            "Away, Alt+Tab back here".to_string()
+        } else {
+            format!(
+                "{}/{} keys  ·  {} missed  ·  {:.0}s",
+                drill.done_steps,
+                drill.n_steps,
+                drill.missed_steps,
+                drill.elapsed(now)
+            )
+        };
+        (text, 100.0 * drill.done_steps as f32 / drill.n_steps.max(1) as f32)
     };
-    let mut text = format!("{wpm:.0} wpm  ·  {accuracy:.0}%  ·  {elapsed:.0}s");
-    if let Some(results) = tutor.results {
-        text.push_str(&format!("  ·  fluidness {:.0}%", results.fluidness));
-    } else if tutor.query == TutorQuery::Start {
-        text = "Type the first character to start".into();
-    } else if tutor.retro_pos > 0 {
-        text.push_str("  ·  ⌫ fix the errors");
-    }
     for mut label in &mut labels {
         if label.0 != text {
             label.0.clone_from(&text);
         }
     }
-    let progress = if tutor.text.is_empty() { 0.0 } else { 100.0 * tutor.cursor as f32 / tutor.text.len() as f32 };
-    let done = if tutor.query == TutorQuery::End { 100.0 } else { progress };
     for mut node in &mut bars {
         node.width = percent(done);
     }
 }
 
-fn update_message(exercise: Res<Exercise>, mut labels: Query<&mut Text, With<MessageText>>) {
-    if !exercise.is_changed() {
+fn update_message(
+    exercise: Res<Exercise>,
+    drill: Res<Drill>,
+    progress: Res<Progress>,
+    mut labels: Query<&mut Text, With<MessageText>>,
+) {
+    if !exercise.is_changed() && !drill.is_changed() && !progress.is_changed() {
         return;
     }
-    let text = if exercise.tutor.query == TutorQuery::End {
+    let text = if !progress.mode.is_typing() {
+        drill.summary.clone()
+    } else if exercise.tutor.query == TutorQuery::End {
         let results = exercise.tutor.results.unwrap_or(crate::klavaro::tutor::Results {
             accuracy: 0.0,
             velocity: 0.0,
@@ -417,10 +597,13 @@ fn update_message(exercise: Res<Exercise>, mut labels: Query<&mut Text, With<Mes
             n_touchs: 0,
             n_errors: 0,
         });
-        let keys = match exercise.mode {
-            ExerciseMode::Basic => "Enter: next exercise · Backspace: previous lesson",
-            _ => "Enter: next exercise",
+        let mut keys = match exercise.mode {
+            ExerciseMode::Basic => "Enter: next exercise · Backspace: previous lesson".to_string(),
+            _ => "Enter: next exercise".to_string(),
         };
+        if let Some((finger, reason)) = &exercise.suggestion {
+            keys = format!("{} · Tab: {} drill · {keys}", capitalize(reason), finger_name(*finger));
+        }
         format!(
             "Accuracy {:.1}% · {:.1} WPM · fluidness {:.0}%\n{}\n{keys}",
             results.accuracy, results.velocity, results.fluidness, exercise.message
@@ -435,8 +618,31 @@ fn update_message(exercise: Res<Exercise>, mut labels: Query<&mut Text, With<Mes
     }
 }
 
-fn update_rankings(mut progress: ResMut<Progress>, mut labels: Query<&mut Text, With<RankingText>>) {
-    let layout = progress.layout;
+fn update_suggestion(
+    exercise: Res<Exercise>,
+    mut buttons: Query<&mut Node, With<SuggestButton>>,
+    mut captions: Query<&mut Text, With<SuggestCaption>>,
+) {
+    if !exercise.is_changed() {
+        return;
+    }
+    let suggestion = exercise.suggestion.as_ref().filter(|_| exercise.tutor.query == TutorQuery::End);
+    for mut node in &mut buttons {
+        node.display = if suggestion.is_some() { Display::Flex } else { Display::None };
+    }
+    if let Some((finger, _)) = suggestion {
+        for mut caption in &mut captions {
+            caption.0 = format!("Train the {}", finger_name(*finger));
+        }
+    }
+}
+
+fn update_rankings(
+    mut progress: ResMut<Progress>,
+    layout: Res<ActiveLayout>,
+    mut labels: Query<&mut Text, With<RankingText>>,
+) {
+    let layout_id = progress.layout;
     let current = progress.bypass_change_detection().current();
     current.update_rankings();
     let list = |keys: &[String]| {
@@ -457,13 +663,22 @@ fn update_rankings(mut progress: ResMut<Progress>, mut labels: Query<&mut Text, 
         .iter()
         .map(|k| format!("{} ×{}", display_char(k.chars().next().unwrap_or(' ')), current.keys[k].misses))
         .collect();
-    let text = format!(
-        "Best keys: {}\nMost missed: {}\n{} · {} exercises done",
+    let mut fingers = current.finger_accuracy(|c| layout.0.finger_of(c));
+    fingers.retain(|(f, _)| *f != 0);
+    fingers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let fingers: Vec<String> =
+        fingers.iter().take(3).map(|(f, accuracy)| format!("{} {accuracy:.0}%", finger_name(*f))).collect();
+    let mut text = format!(
+        "Best keys: {}\nMost missed: {}\nWeakest fingers: {}\n{} · {} exercises done",
         list(&current.best_keys),
         if misses.is_empty() { "none".to_string() } else { misses.join("   ") },
-        layout.name(),
+        if fingers.is_empty() { "not enough touches yet".to_string() } else { fingers.join("   ") },
+        layout_id.name(),
         current.sessions.len(),
     );
+    if let Some(best) = current.alt_tab_best {
+        text.push_str(&format!(" · best Alt+Tab round trip {best:.1} s"));
+    }
     for mut label in &mut labels {
         label.0.clone_from(&text);
     }

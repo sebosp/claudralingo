@@ -36,6 +36,7 @@ pub mod tokens {
     pub const CHAR_WRONG: ThemeToken = ThemeToken::new_static("claudralingo.char.wrong");
     pub const CHAR_WRONG_BG: ThemeToken = ThemeToken::new_static("claudralingo.char.wrong.bg");
     pub const CHAR_RETOUCHED: ThemeToken = ThemeToken::new_static("claudralingo.char.retouched");
+    pub const SELECTION: ThemeToken = ThemeToken::new_static("claudralingo.selection");
     pub const CURSOR: ThemeToken = ThemeToken::new_static("claudralingo.cursor");
     pub const SPARK_OK: ThemeToken = ThemeToken::new_static("claudralingo.spark.ok");
     pub const SPARK_ERROR: ThemeToken = ThemeToken::new_static("claudralingo.spark.error");
@@ -97,6 +98,7 @@ pub fn dark_theme() -> ThemeProps {
     set(&mut props, &tokens::CHAR_WRONG, hex("#ff1f4c"));
     set(&mut props, &tokens::CHAR_WRONG_BG, hex("#ff1f4c").with_alpha(0.25));
     set(&mut props, &tokens::CHAR_RETOUCHED, hex("#ffb200"));
+    set(&mut props, &tokens::SELECTION, hex("#00e5ff").with_alpha(0.3));
     set(&mut props, &tokens::CURSOR, hex("#00e5ff"));
     set(&mut props, &tokens::SPARK_OK, hex("#00e5ff"));
     set(&mut props, &tokens::SPARK_ERROR, hex("#ff1f4c"));
@@ -179,6 +181,7 @@ pub fn light_theme() -> ThemeProps {
     set(&mut props, &tokens::CHAR_WRONG, hex("#d8173f"));
     set(&mut props, &tokens::CHAR_WRONG_BG, hex("#d8173f").with_alpha(0.18));
     set(&mut props, &tokens::CHAR_RETOUCHED, hex("#b87800"));
+    set(&mut props, &tokens::SELECTION, hex("#0088b8").with_alpha(0.25));
     set(&mut props, &tokens::CURSOR, hex("#0088b8"));
     set(&mut props, &tokens::SPARK_OK, hex("#0088b8"));
     set(&mut props, &tokens::SPARK_ERROR, hex("#d8173f"));
