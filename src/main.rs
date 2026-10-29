@@ -152,6 +152,8 @@ mod snapshot {
         mut exit: MessageWriter<AppExit>,
         mut theme: ResMut<claudralingo::theme::ThemeMode>,
         mut keyboard: ResMut<claudralingo::keyboard::KeyboardView>,
+        mut help: ResMut<claudralingo::ui::HelpOpen>,
+        layout: Res<claudralingo::game::ActiveLayout>,
     ) {
         *frame += 1;
         let window = *window;
@@ -162,6 +164,10 @@ mod snapshot {
                 claudralingo::theme::ThemeMode::Dark => claudralingo::theme::ThemeMode::Light,
                 claudralingo::theme::ThemeMode::Light => claudralingo::theme::ThemeMode::Dark,
             };
+        }
+        // The help of the first start, kept with `CLAUDRALINGO_HELP`.
+        if *frame == 45 && std::env::var_os("CLAUDRALINGO_HELP").is_none() {
+            help.0 = false;
         }
         // `CLAUDRALINGO_PREVIEW_LAYER=1` shows a layer as a click on its layer key does.
         if *frame == 50
@@ -188,6 +194,33 @@ mod snapshot {
                 // Stays on the results of the exercise.
                 None => {}
             },
+            // `^` clicks the on-screen key the hints point at: the layer key, a modifier, the key.
+            Some('^') => {
+                let layout = &layout.0;
+                let shown = keyboard.shown_layer().unwrap_or(0);
+                let plan = coach.target.and_then(|t| layout.plan_on(t, shown).or_else(|| layout.plan(t)));
+                if let Some(plan) = plan {
+                    let sticky = keyboard.sticky;
+                    let unarmed = plan.mods.iter().find(|(m, _)| match m {
+                        Special::Ctrl => !sticky.ctrl,
+                        Special::Alt => !sticky.alt,
+                        _ => !sticky.super_key,
+                    });
+                    let layer_key = |l: u8| layout.find_special(Special::Layer(l)).next();
+                    if plan.layer != shown {
+                        let leave = if shown > 0 { shown } else { plan.layer };
+                        if let Some(key) = layer_key(leave) {
+                            keyboard.click(key, false);
+                        }
+                    } else if let Some((_, key)) = unarmed {
+                        keyboard.click(*key, false);
+                    } else if let Some(shift) = plan.shift_key.filter(|_| !sticky.shift) {
+                        keyboard.click(shift, false);
+                    } else {
+                        keyboard.click(plan.key, plan.auto_shift);
+                    }
+                }
+            }
             Some(c) => tap(&mut keys, window, *c),
             None => {}
         }

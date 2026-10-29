@@ -113,8 +113,14 @@ and 24°.
 - Raise: the digits, `- = { [ ( ) ] } / \`, `` ` , : ; . ``, Esc on the left thumb, Tab on the
   right one.
 
-Click Lower or Raise on the screen to see what every key types on that layer, click again to go
-back. The keymap has no Shift, Home, End nor Delete key: the shortcuts round uses ↑, ↓ and
+The keyboard on the screen is an on-screen keyboard too: a click types the key, a long press
+(200 ms, the tapping term of the auto shift) types it shifted. A click on Lower or Raise shows
+and uses its layer until the next click, holding it uses the layer while held (with a second
+finger on a touch screen). The keys that only fall through to the base layer (`&trans`, like the
+right pinky `.` on Raise, next to the `.` of Raise on M) are dimmed. When the next key is not on
+the layer shown, the hint points at the layer key to click, not at the key that types something
+else there. A click on Ctrl, Alt, Win or Shift applies it to the next clicked key: the clicks
+only make key presses for the game, nothing is sent to the system, Win does not open its menu. The keymap has no Shift, Home, End nor Delete key: the shortcuts round uses ↑, ↓ and
 Backspace for Home, End and Delete, and does the Ctrl+Shift selections for you.
 
 The keys are drawn by a small UI material (`src/key.wgsl`) that anti-aliases their edges inside
@@ -152,9 +158,14 @@ trunk serve --release                    # browser, http://127.0.0.1:8080
 trunk build --release                    # browser, into dist/
 ```
 
-`CLAUDRALINGO_SCREENSHOT=shot.png CLAUDRALINGO_TYPE="fj fk<" cargo run` types the given keys
+`CLAUDRALINGO_SCREENSHOT=shot.png CLAUDRALINGO_TYPE="fj fk<" cargo dev` types the given keys
 (`<` is backspace, a tab is Tab, `*` presses the expected key or chord, and fakes the Alt+Tab
-round trip) and saves a screenshot, to check the screen without a keyboard.
+round trip, `^` clicks the on-screen key the hints point at) and saves a screenshot, to check the
+screen without a keyboard. `CLAUDRALINGO_PREVIEW_LAYER=2` shows a layer, `CLAUDRALINGO_HELP=1`
+keeps the help of the first start open.
+
+The help (`?` in the toolbar or F1) sums up the modes, the buttons and the keys, it opens by
+itself on the first start.
 
 ## Credits and license
 

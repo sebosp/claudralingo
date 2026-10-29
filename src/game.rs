@@ -156,6 +156,7 @@ impl Plugin for GamePlugin {
                 Update,
                 (
                     read_keys,
+                    crate::keyboard::on_screen_keys,
                     handle_typing,
                     crate::shortcuts::handle_shortcuts,
                     new_exercise.run_if(on_message::<NewExercise>),
@@ -285,10 +286,19 @@ fn read_keys(
     mut events: MessageReader<KeyboardInput>,
     mut focus_lost: MessageReader<KeyboardFocusLost>,
     mut modifiers: ResMut<Modifiers>,
+    mut help: ResMut<crate::ui::HelpOpen>,
     mut pressed: MessageWriter<KeyPressed>,
 ) {
     for event in events.read() {
         let down = event.state == ButtonState::Pressed;
+        // F1 opens and closes the help, Esc closes it, the help takes the other keys.
+        if down && (event.logical_key == Key::F1 || (help.0 && event.logical_key == Key::Escape)) {
+            help.0 = !help.0;
+            continue;
+        }
+        if help.0 {
+            continue;
+        }
         // AltGr types the symbols of the international layouts, it is not a shortcut modifier.
         if event.logical_key == Key::AltGraph {
             continue;

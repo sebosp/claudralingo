@@ -164,6 +164,7 @@ pub fn key_spec(layers: &[Vec<Binding>], index: usize, finger: u8, row: Row, lef
             })
             .collect(),
         hold: None,
+        inherited: layers.iter().map(|layer| layer.get(index) == Some(&Binding::Trans)).collect(),
         finger,
         row,
         left,

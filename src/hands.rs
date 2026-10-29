@@ -126,8 +126,10 @@ fn hands_gap(layout: &Layout) -> f32 {
 type FingerView<'a> =
     (Entity, &'a Finger, &'a mut BackgroundColor, &'a mut BorderColor, &'a mut UiTransform, Has<BoxShadow>);
 
+#[allow(clippy::too_many_arguments)]
 fn update_hands(
     coach: Res<Coach>,
+    keyboard: Res<crate::keyboard::KeyboardView>,
     layout: Res<ActiveLayout>,
     theme: Res<UiTheme>,
     time: Res<Time>,
@@ -145,7 +147,10 @@ fn update_hands(
             node.column_gap = gap;
         }
     }
-    let plan = coach.target.and_then(|target| layout.plan(target));
+    let shown = keyboard.shown_layer();
+    let plan = coach
+        .target
+        .and_then(|target| shown.and_then(|layer| layout.plan_on(target, layer)).or_else(|| layout.plan(target)));
     let target = plan.as_ref().map(|p| Finger::of_key(layout, p.key));
     let holds: Vec<Finger> = plan
         .iter()

@@ -6,20 +6,28 @@
 //! [`KeyMaterial`] so the rotated ones keep smooth edges. The legends fade out while the typing
 //! goes well, the layout and the colors stay. A wrong key or a pause shows the next key again,
 //! with its legend. The layer trainer always shows the layer and the modifier keys to hold, with
-//! the instructions above the keyboard. A click on a layer key shows the legends of its layer.
+//! the instructions above the keyboard.
+//!
+//! It is an on-screen keyboard too: a click types the key, a long press types it shifted (as
+//! the auto shift of the firmware), a click on a layer key shows and uses its layer until the
+//! next click, holding it uses it while held (with a second finger on a touch screen), a click on
+//! Ctrl, Alt, Win or Shift applies it to the next key. The clicks only make key presses for the
+//! game, nothing reaches the system: Win does not open its menu.
 use bevy::asset::embedded_asset;
 use bevy::feathers::constants::fonts;
 use bevy::feathers::theme::{ThemeBackgroundColor, ThemeToken, UiTheme};
-use bevy::picking::events::PointerClick;
+use bevy::picking::events::{PointerClick, PointerPress, PointerRelease};
+use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 use bevy::text::FontSource;
 
-use crate::game::{ActiveLayout, Coach};
+use crate::game::{ActiveLayout, Coach, KeyPressed};
+use crate::klavaro::{HYPER_BACKSPACE, UPSYM};
 use crate::klavaro::BACKSPACE;
-use crate::layout::{Layout, Plan, Special, Target};
+use crate::layout::{Chord, KeyName, Layout, Mods, Output, Plan, Special, Target};
 use crate::theme::tokens;
 use crate::ui::{KeyboardRoot, TrainerHint};
 
@@ -35,6 +43,11 @@ const PADDING: f32 = 12.0;
 const HINT_FADE: f32 = 0.35;
 /// The fade of the legends follows the coach at this rate per second.
 const FADE_RATE: f32 = 3.0;
+/// A longer press of an on-screen key types it shifted, ZMK's `tapping_term_ms` of the auto
+/// shift.
+pub const TAPPING_TERM: f32 = 0.2;
+/// The legends of the keys that type what the base layer types, on the other layers.
+const INHERITED_ALPHA: f32 = 0.4;
 
 /// A key cap, see `key.wgsl`.
 #[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
@@ -105,8 +118,26 @@ pub struct KeyboardView {
     legends: Option<(u8, bool)>,
     /// The fade of the legends on the screen, it follows the coach smoothly.
     shown_fade: f32,
-    /// The layer shown after a click on its layer key.
+    /// The layer shown and used after a click on its layer key.
     pub preview: Option<u8>,
+    /// The layer of an on-screen layer key held down.
+    pub held_layer: Option<u8>,
+    /// The modifiers clicked on the screen, for the next key.
+    pub sticky: Mods,
+    /// The keys clicked, with a long press or not, for [`on_screen_keys`].
+    clicks: Vec<(usize, bool)>,
+}
+
+impl KeyboardView {
+    /// Clicks an on-screen key, as the pointer does.
+    pub fn click(&mut self, key: usize, long: bool) {
+        self.clicks.push((key, long));
+    }
+
+    /// The layer of the keys on the screen, `None` for the layer of the next key.
+    pub fn shown_layer(&self) -> Option<u8> {
+        self.held_layer.or(self.preview)
+    }
 }
 
 impl KeyboardView {
@@ -169,6 +200,9 @@ fn rebuild_keyboard(
         legends: None,
         shown_fade: 1.0,
         preview: None,
+        held_layer: None,
+        sticky: Mods::NONE,
+        clicks: Vec::new(),
     };
 }
 
@@ -213,10 +247,24 @@ fn spawn_key(
             ChildOf(parent),
         ))
         .id();
+    commands.entity(node).observe(move |click: On<PointerClick>, mut view: ResMut<KeyboardView>| {
+        if click.button == PointerButton::Primary {
+            view.clicks.push((index, click.duration.as_secs_f32() >= TAPPING_TERM));
+        }
+    });
     if let Some(Special::Layer(layer)) = key.special {
-        commands.entity(node).observe(move |_: On<PointerClick>, mut view: ResMut<KeyboardView>| {
-            view.preview = if view.preview == Some(layer) { None } else { Some(layer) };
-        });
+        commands
+            .entity(node)
+            .observe(move |press: On<PointerPress>, mut view: ResMut<KeyboardView>| {
+                if press.button == PointerButton::Primary {
+                    view.held_layer = Some(layer);
+                }
+            })
+            .observe(move |_: On<PointerRelease>, mut view: ResMut<KeyboardView>| {
+                if view.held_layer == Some(layer) {
+                    view.held_layer = None;
+                }
+            });
     }
     let legend = key.legend(0, false, &layout.layer_names);
     let font_size = if legend.chars().count() > 2 { 12.0 } else { 19.0 };
@@ -246,7 +294,7 @@ fn spawn_key(
 }
 
 /// The roles of the keys for the next target, with its plan.
-pub fn hints(layout: &Layout, target: Option<Target>) -> (Vec<KeyRole>, Option<Plan>) {
+pub fn hints(layout: &Layout, target: Option<Target>, shown_layer: Option<u8>) -> (Vec<KeyRole>, Option<Plan>) {
     let mut roles = vec![KeyRole::Idle; layout.keys.len()];
     let Some(target) = target else {
         return (roles, None);
@@ -257,7 +305,8 @@ pub fn hints(layout: &Layout, target: Option<Target>) -> (Vec<KeyRole>, Option<P
         }
         return (roles, None);
     }
-    let Some(plan) = layout.plan(target) else {
+    let plan = shown_layer.and_then(|layer| layout.plan_on(target, layer)).or_else(|| layout.plan(target));
+    let Some(plan) = plan else {
         return (roles, None);
     };
     // Purple: the key itself is held for the shift.
@@ -272,6 +321,74 @@ pub fn hints(layout: &Layout, target: Option<Target>) -> (Vec<KeyRole>, Option<P
         roles[*key] = KeyRole::Hold;
     }
     (roles, Some(plan))
+}
+
+fn press_special(special: Special, mods: Mods) -> KeyPressed {
+    let plain = !(mods.ctrl || mods.alt || mods.super_key);
+    let typed = match special {
+        Special::Backspace if mods.ctrl => Some(HYPER_BACKSPACE),
+        Special::Backspace => Some(BACKSPACE),
+        Special::Enter if plain => Some(UPSYM),
+        Special::Space if plain => Some(' '),
+        _ => None,
+    };
+    KeyPressed { typed, chord: Some(Chord::new(mods, KeyName::Special(special))) }
+}
+
+fn press_char(out: Output, long: bool, mods: Mods) -> KeyPressed {
+    let shifted = long || mods.shift;
+    if mods.ctrl || mods.alt || mods.super_key {
+        let mods = Mods { shift: shifted, ..mods };
+        return KeyPressed { typed: None, chord: Some(Chord::new(mods, KeyName::Char(out.lo))) };
+    }
+    let c = if shifted { out.up } else { out.lo };
+    KeyPressed { typed: Some(c), chord: Some(Chord::char(c)) }
+}
+
+/// The keys clicked on the screen become key presses of the game, on the layer shown.
+pub fn on_screen_keys(
+    mut view: ResMut<KeyboardView>,
+    layout: Res<ActiveLayout>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    mut pressed: MessageWriter<KeyPressed>,
+) {
+    // A layer key released away from it.
+    if view.held_layer.is_some() && !mouse.pressed(MouseButton::Left) && touches.iter().next().is_none() {
+        view.held_layer = None;
+    }
+    if view.clicks.is_empty() {
+        return;
+    }
+    for (key, long) in std::mem::take(&mut view.clicks) {
+        let Some(spec) = layout.0.keys.get(key) else {
+            continue;
+        };
+        let layer = view.shown_layer().unwrap_or(0);
+        let mods = view.sticky;
+        match spec.binding_on(layer) {
+            // A long press held the layer, a click toggles it.
+            (Some(Special::Layer(l)), _) => {
+                if !long {
+                    view.preview = if view.preview == Some(l) { None } else { Some(l) };
+                }
+            }
+            (Some(Special::Ctrl), _) => view.sticky.ctrl = !mods.ctrl,
+            (Some(Special::Alt), _) => view.sticky.alt = !mods.alt,
+            (Some(Special::Super), _) => view.sticky.super_key = !mods.super_key,
+            (Some(Special::Shift), _) => view.sticky.shift = !mods.shift,
+            (Some(Special::Bluetooth(_) | Special::BluetoothClear | Special::Caps), _) => {}
+            (Some(special), _) => {
+                pressed.write(press_special(special, mods));
+                view.sticky = Mods::NONE;
+            }
+            (None, Some(out)) => {
+                pressed.write(press_char(out, long, mods));
+                view.sticky = Mods::NONE;
+            }
+            (None, None) => {}
+        }
+    }
 }
 
 fn to_vec4(color: Color) -> Vec4 {
@@ -296,24 +413,76 @@ fn update_hints(
     }
     let step = FADE_RATE * time.delta_secs();
     view.shown_fade += (coach.fade - view.shown_fade).clamp(-step, step);
-    let preview = view.preview;
-    // The legends of a previewed layer are all shown.
-    let fade = if preview.is_some() { 1.0 } else { view.shown_fade };
+    let shown_layer = view.shown_layer();
+    // The legends of a layer on the screen are all shown.
+    let fade = if shown_layer.is_some() { 1.0 } else { view.shown_fade };
+    let names = &layout.layer_names;
 
-    let (mut roles, plan) = hints(layout, coach.target);
+    // On a layer on the screen, a key of that layer when one types the target.
+    let (mut roles, plan) = hints(layout, coach.target, shown_layer);
     let trainer_applies = (coach.layer_trainer && plan.as_ref().is_some_and(Plan::is_combo)) || coach.always_show;
     let show_plan = coach.reveal || trainer_applies || coach.fade > HINT_FADE;
-    let in_plan = |key: usize| plan.as_ref().is_some_and(|p| p.keys().any(|k| k == key));
-    if let Some(layer) = preview {
+    let mut in_plan = vec![false; layout.keys.len()];
+    for key in plan.iter().flat_map(Plan::keys) {
+        in_plan[key] = true;
+    }
+    // The keys the view itself highlights, they are always shown.
+    let mut forced = vec![false; layout.keys.len()];
+    let mut force = |roles: &mut Vec<KeyRole>, key: usize| {
+        roles[key] = KeyRole::Hold;
+        forced[key] = true;
+    };
+    let mut layer_hint = None;
+    if let Some(layer) = shown_layer {
+        let layer_name = Special::Layer(layer).name(names);
+        if let Some(p) = plan.as_ref().filter(|p| p.layer != layer) {
+            // The next key is not on the layer shown: the layer key to leave it, not a key
+            // that types something else here.
+            for key in p.keys() {
+                roles[key] = KeyRole::Idle;
+                in_plan[key] = false;
+            }
+            let legend = layout.keys[p.key].legend(p.layer, p.shift, names);
+            layer_hint = Some(if p.layer == 0 {
+                format!("{legend} is on the Base layer: click {layer_name} to go back")
+            } else {
+                let name = Special::Layer(p.layer).name(names);
+                format!("{legend} is on the {name} layer: click {layer_name} to go back, then use {name}")
+            });
+        } else if view.held_layer.is_some() {
+            layer_hint = Some(format!("{layer_name} held: the keys type its layer"));
+        } else {
+            layer_hint = Some(format!(
+                "The {layer_name} layer: the keys type what they type while {layer_name} is held, click {layer_name} again to go back"
+            ));
+        }
         for key in layout.find_special(Special::Layer(layer)) {
-            roles[key] = KeyRole::Hold;
+            force(&mut roles, key);
         }
     }
+    // The modifiers clicked on the screen.
+    let sticky = view.sticky;
+    let armed: Vec<Special> = [
+        (sticky.ctrl, Special::Ctrl),
+        (sticky.alt, Special::Alt),
+        (sticky.super_key, Special::Super),
+        (sticky.shift, Special::Shift),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, s)| s)
+    .collect();
+    for modifier in &armed {
+        for key in layout.find_special(*modifier) {
+            force(&mut roles, key);
+        }
+    }
+    let in_plan = |key: usize| in_plan[key];
     let border = theme.color(&tokens::KEY_BORDER);
 
     for (index, role) in roles.iter().enumerate() {
         // Backspace is always shown while there are errors to erase.
-        let previewed = preview.is_some() && *role == KeyRole::Hold && !in_plan(index);
+        let previewed = forced[index];
         let role = if show_plan || *role == KeyRole::Erase || previewed { *role } else { KeyRole::Idle };
         let entities = &mut view.keys[index];
         // The keys spawned this frame are not queryable yet, they start idle.
@@ -336,6 +505,9 @@ fn update_hints(
         }
         let alpha = if role != KeyRole::Idle && (in_plan(index) || role == KeyRole::Erase || previewed) {
             1.0
+        } else if shown_layer.is_some_and(|l| layout.keys[index].is_inherited(l)) {
+            // `&trans`: the key types what the base layer types.
+            INHERITED_ALPHA
         } else {
             fade
         };
@@ -358,8 +530,8 @@ fn update_hints(
     }
 
     // The legends of the previewed layer, or of the layer, and shifted, of the next key.
-    let legends = match (&plan, preview) {
-        (_, Some(layer)) => (layer, false),
+    let legends = match (&plan, shown_layer) {
+        (_, Some(layer)) => (layer, sticky.shift),
         (Some(plan), None) if show_plan => (plan.layer, plan.shift),
         _ => (0, false),
     };
@@ -375,13 +547,16 @@ fn update_hints(
         view.legends = Some(legends);
     }
 
-    let instructions = match (&plan, preview) {
-        (_, Some(layer)) => {
-            let name = Special::Layer(layer).name(&layout.layer_names);
-            format!("The {name} layer: what the keys type while {name} is held, click {name} again to hide it")
+    let instructions = if let Some(hint) = layer_hint {
+        hint
+    } else if !armed.is_empty() {
+        let names: Vec<String> = armed.iter().map(|m| m.name(names)).collect();
+        format!("{} for the next key, click it again to cancel", names.join(" + "))
+    } else {
+        match &plan {
+            Some(plan) if trainer_applies => layout.describe(plan),
+            _ => String::new(),
         }
-        (Some(plan), None) if trainer_applies => layout.describe(plan),
-        _ => String::new(),
     };
     for mut text in &mut trainer {
         if text.0 != instructions {

@@ -9,6 +9,7 @@ use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
 use bevy::ui::{Checked, Selected};
+use bevy::picking::events::PointerClick;
 use bevy::ui_widgets::{Activate, ValueChange};
 
 use crate::drills::FINGERS;
@@ -71,13 +72,48 @@ struct SettingControl(Setting);
 struct SuggestButton;
 
 #[derive(Component, Default, Clone)]
+struct HelpOverlay;
+
+/// The help is on the screen.
+#[derive(Resource, Default)]
+pub struct HelpOpen(pub bool);
+
+const HELP: &str = "\
+MODES, the first menu
+  Basic course, Adaptability, Velocity, Fluidness: the exercises of Klavaro
+  Finger drill: one finger up and down its keys, ‹ › picks the finger
+  Left and Right hand finger bounce: middle and index finger in turns, aLtErNaTiNg case
+  Shortcuts & keys: Esc, arrows, numbers, symbols, Ctrl and Alt shortcuts, Alt+Tab
+
+TOOLBAR
+  ‹ ›  the lesson, the finger or the hand    Restart  a new text
+  Fade legends  the letters fade while you type well, an error or a pause shows the next key
+  Layer trainer  always shows the layer and the modifier keys to hold
+  The keyboard menu picks the layout, Dark the theme
+
+TYPING
+  Backspace erases the errors, Ctrl+Backspace all of them
+  At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill
+
+COLORS
+  green the next key, purple shift or hold the key longer (auto shift), amber hold, red backspace
+  The stripes of the keys and the hands below show the finger of every key
+
+ON-SCREEN KEYBOARD
+  Click a key to type it, a long press types it shifted
+  Lower and Raise: click to show and use their layer, click again to go back, or hold them
+  Ctrl, Alt, Win: click them, then the key: they are never sent to your system
+
+F1 or ? opens this help, Esc or a click closes it. The progress is saved in ~/.config/claudralingo";
+
+#[derive(Component, Default, Clone)]
 struct SuggestCaption;
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_ui).add_systems(
+        app.init_resource::<HelpOpen>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
             Update,
             (
                 init_settings,
@@ -87,6 +123,7 @@ impl Plugin for UiPlugin {
                 update_live_stats,
                 update_message,
                 update_suggestion,
+                show_help.run_if(resource_changed::<HelpOpen>),
                 update_rankings.run_if(resource_changed::<Progress>),
             )
                 .after(crate::game::GameSystems),
@@ -190,6 +227,8 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene {
             @flex_spacer()
             --
             @rankings()
+            --
+            @help_overlay()
         ]
     }
 }
@@ -260,11 +299,44 @@ fn toolbar(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>) -> impl Scene
             }
             on(on_layout_change)
             --
+            @FeathersButton {
+                @caption: bsn! { @caption("?") }
+            }
+            on(toggle_help)
+            --
             @label_dim("Dark")
             --
             @FeathersToggleSwitch
             SettingControl(Setting::Dark)
             on(on_setting_change)
+        ]
+    }
+}
+
+fn help_overlay() -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            display: Display::None,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6))
+        GlobalZIndex(50)
+        HelpOverlay
+        on(close_help)
+        Children [
+            @group()
+            Node {
+                width: px(820),
+            }
+            Children [
+                @group_header() Children [ @label("Claudralingo") ]
+                --
+                @group_body() Children [ @label(HELP) ]
+            ]
         ]
     }
 }
@@ -494,6 +566,30 @@ fn train_suggested_finger(
 ) {
     go_to_suggestion(&exercise, &mut progress, &mut new_exercise);
     release_focus(&mut focus);
+}
+
+/// The help on the first start.
+fn first_help(mut progress: ResMut<Progress>, mut help: ResMut<HelpOpen>) {
+    if !progress.help_seen {
+        help.0 = true;
+        progress.help_seen = true;
+        progress.save();
+    }
+}
+
+fn toggle_help(_: On<Activate>, mut help: ResMut<HelpOpen>, mut focus: ResMut<InputFocus>) {
+    help.0 = !help.0;
+    release_focus(&mut focus);
+}
+
+fn close_help(_: On<PointerClick>, mut help: ResMut<HelpOpen>) {
+    help.0 = false;
+}
+
+fn show_help(help: Res<HelpOpen>, mut overlays: Query<&mut Node, With<HelpOverlay>>) {
+    for mut node in &mut overlays {
+        node.display = if help.0 { Display::Flex } else { Display::None };
+    }
 }
 
 fn display_char(c: char) -> String {

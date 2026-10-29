@@ -259,6 +259,8 @@ pub struct KeySpec {
     pub layer_specials: Vec<Option<Special>>,
     /// The modifier of a home row mod, sent while the key is held.
     pub hold: Option<Special>,
+    /// By layer, the key types what the base layer types (ZMK's `&trans`).
+    pub inherited: Vec<bool>,
     pub finger: u8,
     pub row: Row,
     pub left: bool,
@@ -304,6 +306,19 @@ impl KeyPos {
 }
 
 impl KeySpec {
+    /// What the key types on a layer: a special key or a character.
+    pub fn binding_on(&self, layer: u8) -> (Option<Special>, Option<Output>) {
+        match (layer, self.outputs.get(layer as usize).copied().flatten()) {
+            (0, output) => (self.special, output),
+            (_, Some(output)) => (None, Some(output)),
+            (_, None) => (self.special_on(layer).or(self.special), None),
+        }
+    }
+
+    pub fn is_inherited(&self, layer: u8) -> bool {
+        layer > 0 && self.inherited.get(layer as usize).copied().unwrap_or(false)
+    }
+
     pub fn special_on(&self, layer: u8) -> Option<Special> {
         if layer == 0 {
             self.special
@@ -485,12 +500,30 @@ impl Layout {
     }
 
     pub fn plan(&self, target: Target) -> Option<Plan> {
+        self.plan_from(target, None)
+    }
+
+    /// The plan with a key of `layer`, when one types the target there: Space is on the thumbs
+    /// of Raise too.
+    pub fn plan_on(&self, target: Target, layer: u8) -> Option<Plan> {
+        self.plan_from(target, Some(layer))
+    }
+
+    fn plan_from(&self, target: Target, layer: Option<u8>) -> Option<Plan> {
+        let locate = |c: char| match layer {
+            None => self.locate(c),
+            Some(layer) => self.locate_on(c, layer),
+        };
+        let locate_special = |s: Special| match layer {
+            None => self.locate_special(s),
+            Some(layer) => self.locate_special_on(s, layer),
+        };
         let (location, mods) = match target {
-            Target::Char(c) => (self.locate(c)?, Mods::NONE),
+            Target::Char(c) => (locate(c)?, Mods::NONE),
             Target::Chord(chord) => {
                 let location = match chord.key {
-                    KeyName::Char(c) => self.locate(c)?,
-                    KeyName::Special(s) => self.locate_special(s)?,
+                    KeyName::Char(c) => locate(c)?,
+                    KeyName::Special(s) => locate_special(s)?,
                 };
                 (location, chord.mods)
             }
@@ -507,6 +540,28 @@ impl Layout {
             layer_key: if location.layer > 0 { self.layer_key_for(key, location.layer) } else { None },
             mods: mods.held().filter_map(|m| Some((m, self.modifier_for(key, m)?))).collect(),
         })
+    }
+
+    /// A character typed by a key of one layer, the special keys of the thumbs included.
+    pub fn locate_on(&self, c: char, layer: u8) -> Option<KeyLocation> {
+        for (i, key) in self.keys.iter().enumerate() {
+            match key.binding_on(layer) {
+                (Some(special), _) if special.typed() == Some(c) => {
+                    return Some(KeyLocation { key: i, layer, shift: false });
+                }
+                (None, Some(out)) if out.lo == c => return Some(KeyLocation { key: i, layer, shift: false }),
+                _ => {}
+            }
+        }
+        self.keys.iter().enumerate().find_map(|(i, key)| match key.binding_on(layer) {
+            (None, Some(out)) if out.up == c && out.lo != c => Some(KeyLocation { key: i, layer, shift: true }),
+            _ => None,
+        })
+    }
+
+    pub fn locate_special_on(&self, special: Special, layer: u8) -> Option<KeyLocation> {
+        let key = self.keys.iter().position(|k| k.binding_on(layer).0 == Some(special))?;
+        Some(KeyLocation { key, layer, shift: false })
     }
 
     /// Every key of the target exists on this layout: Ctrl+Shift+→ needs a shift key, the
@@ -605,6 +660,7 @@ fn char_key(lo: char, up: char, finger: u8, row: Row, width: f32) -> KeySpec {
         special: None,
         layer_specials: vec![],
         hold: None,
+        inherited: vec![],
         finger,
         row,
         left: finger < 5,
@@ -618,6 +674,7 @@ fn special_key(special: Special, finger: u8, left: bool, width: f32) -> KeySpec 
         special: Some(special),
         layer_specials: vec![],
         hold: None,
+        inherited: vec![],
         finger,
         row: Row::Other,
         left,
@@ -889,6 +946,20 @@ mod tests {
         assert_eq!(layout.keys[x].legend(1, false, &layout.layer_names), "x");
         let z = layout.locate('z').unwrap().key;
         assert_eq!(layout.keys[z].legend(1, false, &layout.layer_names), "BT×");
+    }
+
+    #[test]
+    fn plans_on_the_layer_shown() {
+        let layout = corne36();
+        // Raise has its own Space, the base f is not on Raise.
+        let space = layout.plan_on(Target::Char(' '), 2).unwrap();
+        assert_eq!((space.layer, layout.keys[space.key].left), (2, true));
+        assert!(layout.plan_on(Target::Char('f'), 2).is_none());
+        // &trans keys type the base character on the layer.
+        assert_eq!(layout.plan_on(Target::Char('x'), 1).map(|p| p.layer), Some(1));
+        // Auto shift on a layer: ? is the long press of /.
+        let question = layout.plan_on(Target::Char('?'), 2).unwrap();
+        assert!(question.auto_shift);
     }
 
     #[test]

@@ -181,6 +181,8 @@ pub struct Progress {
     pub fade_legends: bool,
     /// Shows the layer and modifier keys to hold for the characters of the other layers.
     pub layer_trainer: bool,
+    /// The help was shown once, on the first start.
+    pub help_seen: bool,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -192,6 +194,7 @@ impl Default for Progress {
             mode: ExerciseMode::default(),
             fade_legends: true,
             layer_trainer: true,
+            help_seen: false,
             layouts: BTreeMap::new(),
         }
     }
