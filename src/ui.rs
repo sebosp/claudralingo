@@ -77,7 +77,6 @@ struct LayoutSelect;
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Setting {
     #[default]
-    Dark,
     FadeLegends,
     LayerTrainer,
     ShowHands,
@@ -87,6 +86,7 @@ enum Setting {
     PinyinKeypad,
     Sound,
     LockLessons,
+    Compact,
 }
 
 #[derive(Component, Default, Clone)]
@@ -115,6 +115,10 @@ struct KeymapStatus;
 /// A paste of a keymap waiting for the clipboard.
 #[derive(Resource, Default)]
 struct PendingKeymap(Option<bevy::clipboard::ClipboardRead>);
+
+/// Pushes the hands to the bottom in the compact view.
+#[derive(Component, Default, Clone)]
+struct CompactSpacer;
 
 /// The views of the keyboard modes, hidden in the hanzi mode.
 #[derive(Component, Default, Clone)]
@@ -229,10 +233,17 @@ fn spawn_ui(mut commands: Commands, progress: Res<Progress>) {
     let layouts = list_rows_from_strings(LayoutId::ALL.map(LayoutId::name), layout);
     let background = BackgroundLevel::ALL.iter().position(|b| *b == progress.background);
     let backgrounds = list_rows_from_strings(BackgroundLevel::ALL.map(BackgroundLevel::name), background);
-    commands.spawn_scene(root(modes, layouts, backgrounds));
+    let theme = ThemeMode::ALL.iter().position(|t| *t == progress.theme);
+    let themes = list_rows_from_strings(ThemeMode::ALL.map(ThemeMode::name), theme);
+    commands.spawn_scene(root(modes, layouts, backgrounds, themes));
 }
 
-fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>) -> impl Scene {
+fn root(
+    modes: Box<dyn SceneList>,
+    layouts: Box<dyn SceneList>,
+    backgrounds: Box<dyn SceneList>,
+    themes: Box<dyn SceneList>,
+) -> impl Scene {
     bsn! {
         Node {
             width: percent(100),
@@ -344,6 +355,13 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
                 TypingOnly
                 --
                 Node {
+                    display: Display::None,
+                    // Takes the space before the spacer at the bottom.
+                    flex_grow: 100.0,
+                }
+                CompactSpacer
+                --
+                Node {
                     display: Display::Flex,
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::Center,
@@ -366,7 +384,7 @@ fn root(modes: Box<dyn SceneList>, layouts: Box<dyn SceneList>, backgrounds: Box
             --
             @help_overlay()
             --
-            @settings_overlay(layouts, backgrounds)
+            @settings_overlay(layouts, backgrounds, themes)
             --
             @lessons_overlay()
             --
@@ -455,7 +473,7 @@ fn setting_checkbox(setting: Setting, text: &'static str) -> impl Scene {
     }
 }
 
-fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>) -> impl Scene {
+fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>, themes: Box<dyn SceneList>) -> impl Scene {
     bsn! {
         Node {
             position_type: PositionType::Absolute,
@@ -531,11 +549,15 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         column_gap: px(12),
                     }
                     Children [
-                        @label("Dark mode") Node { min_width: px(110) }
+                        @label("Theme") Node { min_width: px(110) }
                         --
-                        @FeathersToggleSwitch
-                        SettingControl(Setting::Dark)
-                        on(on_setting_change)
+                        @FeathersSelect {
+                            @options: themes,
+                        }
+                        Node {
+                            min_width: px(180),
+                        }
+                        on(on_theme_change)
                     ]
                     --
                     Node {
@@ -562,6 +584,8 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     @setting_checkbox(Setting::LayerTrainer, "Layer trainer: show the layer and modifier keys to hold")
                     --
                     @setting_checkbox(Setting::ShowHands, "Show the hands under the keyboard")
+                    --
+                    @setting_checkbox(Setting::Compact, "Compact, for phones: no keyboard, the finger tips and the layer to hold")
                     --
                     @setting_checkbox(Setting::ReduceMotion, "Reduce motion: no drift, sparks, shakes nor breathing keys")
                     --
@@ -954,7 +978,6 @@ fn stats_bar() -> impl Scene {
 impl Setting {
     fn get(self, progress: &Progress) -> bool {
         match self {
-            Setting::Dark => progress.theme == ThemeMode::Dark,
             Setting::FadeLegends => progress.fade_legends,
             Setting::LayerTrainer => progress.layer_trainer,
             Setting::ShowHands => progress.show_hands,
@@ -964,6 +987,7 @@ impl Setting {
             Setting::PinyinKeypad => progress.pinyin_keypad,
             Setting::Sound => progress.sound,
             Setting::LockLessons => progress.lock_lessons,
+            Setting::Compact => progress.compact,
         }
     }
 }
@@ -986,7 +1010,6 @@ fn release_focus(focus: &mut InputFocus) {
 fn on_setting_change(
     change: On<ValueChange<bool>>,
     settings: Query<&SettingControl>,
-    mut mode: ResMut<ThemeMode>,
     mut progress: ResMut<Progress>,
     mut focus: ResMut<InputFocus>,
     mut commands: Commands,
@@ -1000,10 +1023,6 @@ fn on_setting_change(
         commands.entity(change.source).remove::<Checked>();
     }
     match setting {
-        Setting::Dark => {
-            *mode = if change.value { ThemeMode::Dark } else { ThemeMode::Light };
-            progress.theme = *mode;
-        }
         Setting::FadeLegends => progress.fade_legends = change.value,
         Setting::LayerTrainer => progress.layer_trainer = change.value,
         Setting::ShowHands => progress.show_hands = change.value,
@@ -1013,6 +1032,7 @@ fn on_setting_change(
         Setting::PinyinKeypad => progress.pinyin_keypad = change.value,
         Setting::Sound => progress.sound = change.value,
         Setting::LockLessons => progress.lock_lessons = change.value,
+        Setting::Compact => progress.compact = change.value,
     }
     progress.save();
     release_focus(&mut focus);
@@ -1319,6 +1339,23 @@ fn close_panel(_: On<PointerClick>, mut panel: ResMut<Panel>) {
     *panel = Panel::None;
 }
 
+fn on_theme_change(
+    change: On<ValueChange<Entity>>,
+    options: Query<&OptionIndex>,
+    mut mode: ResMut<ThemeMode>,
+    mut progress: ResMut<Progress>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if let Ok(option) = options.get(change.value)
+        && let Some(theme) = ThemeMode::ALL.get(option.0)
+    {
+        *mode = *theme;
+        progress.theme = *theme;
+        progress.save();
+    }
+    release_focus(&mut focus);
+}
+
 fn on_background_change(
     change: On<ValueChange<Entity>>,
     options: Query<&OptionIndex>,
@@ -1352,20 +1389,22 @@ fn show_panels(
     }
 }
 
+type TypingViews = (With<TypingOnly>, Without<crate::hanzi::HanziRoot>);
+
 /// The keyboard views or the hanzi view.
 fn show_hanzi(
     progress: Res<Progress>,
-    mut typing: Query<&mut Node, (With<TypingOnly>, Without<crate::hanzi::HanziRoot>)>,
-    mut hanzi: Query<&mut Node, With<crate::hanzi::HanziRoot>>,
+    mut typing: Query<(&mut Node, Has<KeyboardRoot>), TypingViews>,
+    mut hanzi: Query<&mut Node, (With<crate::hanzi::HanziRoot>, Without<TypingOnly>)>,
 ) {
     if !progress.is_changed() {
         return;
     }
     let is_hanzi = progress.mode == ExerciseMode::Hanzi;
     let show = |visible: bool| if visible { Display::Flex } else { Display::None };
-    for mut node in &mut typing {
-        // The exercise area hides its own parts.
-        let display = show(!is_hanzi);
+    for (mut node, is_keyboard) in &mut typing {
+        // The exercise area hides its own parts; the compact view has no keyboard.
+        let display = show(!is_hanzi && !(is_keyboard && progress.compact));
         if node.display != display {
             node.display = display;
         }
@@ -1378,11 +1417,23 @@ fn show_hanzi(
     }
 }
 
-fn show_hands(progress: Res<Progress>, mut hands: Query<&mut Node, With<HandsRoot>>) {
+fn show_hands(
+    progress: Res<Progress>,
+    mut hands: Query<&mut Node, (With<HandsRoot>, Without<CompactSpacer>)>,
+    mut spacers: Query<&mut Node, With<CompactSpacer>>,
+) {
     if !progress.is_changed() {
         return;
     }
-    let display = if progress.show_hands && progress.mode != ExerciseMode::Hanzi { Display::Flex } else { Display::None };
+    for mut node in &mut spacers {
+        node.display = if progress.compact && progress.mode != ExerciseMode::Hanzi { Display::Flex } else { Display::None };
+    }
+    // No hands in the hanzi mode, nor in the Matrix.
+    let display = if progress.show_hands && progress.mode != ExerciseMode::Hanzi && progress.theme != ThemeMode::Matrix {
+        Display::Flex
+    } else {
+        Display::None
+    };
     for mut node in &mut hands {
         if node.display != display {
             node.display = display;

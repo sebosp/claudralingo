@@ -1,0 +1,55 @@
+# Maintainer: Seb Ospina <kraige at gmail dot com>
+# The development package of the AUR, built from the main branch of GitHub.
+pkgname=claudralingo-git
+pkgver=r0
+pkgrel=1
+pkgdesc="Touch typing tutor for split keyboards (Corne, Lily58, ZMK keymaps) and HSK hanzi, made with Bevy"
+arch=('x86_64')
+url="https://github.com/sebosp/claudralingo"
+license=('GPL-3.0-or-later')
+depends=('alsa-lib' 'gcc-libs' 'glibc' 'libxkbcommon' 'systemd-libs' 'vulkan-icd-loader' 'wayland')
+makedepends=('cargo' 'clang' 'git' 'mold')
+provides=('claudralingo')
+conflicts=('claudralingo')
+options=('!lto')
+source=("${pkgname%-git}::git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${pkgname%-git}"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "${pkgname%-git}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "${pkgname%-git}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "${pkgname%-git}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "${pkgname%-git}"
+  install -Dm755 target/release/claudralingo "$pkgdir/usr/bin/claudralingo"
+  install -Dm644 packaging/arch/claudralingo.desktop "$pkgdir/usr/share/applications/claudralingo.desktop"
+  install -Dm644 assets/web/favicon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/claudralingo.svg"
+  install -Dm644 assets/web/apple-touch-icon.png "$pkgdir/usr/share/icons/hicolor/180x180/apps/claudralingo.png"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/claudralingo/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # The embedded hanzi data: its licenses and attributions.
+  install -Dm644 assets/hanzi/LICENSES.md "$pkgdir/usr/share/licenses/$pkgname/hanzi/LICENSES.md"
+  install -Dm644 assets/hanzi/ARPHICPL.TXT "$pkgdir/usr/share/licenses/$pkgname/hanzi/ARPHICPL.TXT"
+  install -Dm644 assets/hanzi/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/hanzi/OFL.txt"
+}

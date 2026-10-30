@@ -15,6 +15,31 @@ pub enum ThemeMode {
     #[default]
     Dark,
     Light,
+    /// The colors of the Tokyo Night theme of Neovim and the terminals.
+    TokyoNight,
+    /// Gruvbox, its dark variant.
+    Gruvbox,
+    /// Green on black, the code falling in the background, no hands.
+    Matrix,
+}
+
+impl ThemeMode {
+    pub const ALL: [ThemeMode; 5] =
+        [ThemeMode::Dark, ThemeMode::Light, ThemeMode::TokyoNight, ThemeMode::Gruvbox, ThemeMode::Matrix];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "Dark",
+            ThemeMode::Light => "Light",
+            ThemeMode::TokyoNight => "Tokyo Night",
+            ThemeMode::Gruvbox => "Gruvbox",
+            ThemeMode::Matrix => "Matrix",
+        }
+    }
+
+    pub fn is_dark(self) -> bool {
+        self != ThemeMode::Light
+    }
 }
 
 pub mod tokens {
@@ -104,7 +129,153 @@ pub fn props(mode: ThemeMode) -> ThemeProps {
     match mode {
         ThemeMode::Dark => dark_theme(),
         ThemeMode::Light => light_theme(),
+        ThemeMode::TokyoNight => terminal_theme(&TOKYO_NIGHT),
+        ThemeMode::Gruvbox => terminal_theme(&GRUVBOX),
+        ThemeMode::Matrix => terminal_theme(&MATRIX),
     }
+}
+
+/// The colors of a dark theme of the terminals, from the darkest to the text.
+struct Terminal {
+    window: &'static str,
+    pane: &'static str,
+    item: &'static str,
+    border: &'static str,
+    text: &'static str,
+    dim: &'static str,
+    accent: &'static str,
+    green: &'static str,
+    red: &'static str,
+    yellow: &'static str,
+    purple: &'static str,
+    orange: &'static str,
+    /// From the pinky to the thumb, and the layers (base, Lower, Raise).
+    fingers: [&'static str; 5],
+    layers: [&'static str; 3],
+}
+
+/// Tokyo Night, the night variant (folke/tokyonight.nvim).
+const TOKYO_NIGHT: Terminal = Terminal {
+    window: "#1a1b26",
+    pane: "#1f2335",
+    item: "#292e42",
+    border: "#3b4261",
+    text: "#c0caf5",
+    dim: "#737aa2",
+    accent: "#7aa2f7",
+    green: "#9ece6a",
+    red: "#f7768e",
+    yellow: "#e0af68",
+    purple: "#bb9af7",
+    orange: "#ff9e64",
+    fingers: ["#7aa2f7", "#ff9e64", "#9ece6a", "#e0af68", "#bb9af7"],
+    layers: ["#565f89", "#1abc9c", "#bb9af7"],
+};
+
+/// Gruvbox dark (morhetz/gruvbox).
+const GRUVBOX: Terminal = Terminal {
+    window: "#1d2021",
+    pane: "#282828",
+    item: "#3c3836",
+    border: "#504945",
+    text: "#ebdbb2",
+    dim: "#a89984",
+    accent: "#83a598",
+    green: "#b8bb26",
+    red: "#fb4934",
+    yellow: "#fabd2f",
+    purple: "#d3869b",
+    orange: "#fe8019",
+    fingers: ["#83a598", "#fe8019", "#b8bb26", "#fabd2f", "#d3869b"],
+    layers: ["#928374", "#8ec07c", "#d3869b"],
+};
+
+/// The green phosphor of the movie; the errors stay red, they must be seen.
+const MATRIX: Terminal = Terminal {
+    window: "#000000",
+    pane: "#03140a",
+    item: "#062712",
+    border: "#0d4d22",
+    text: "#b6ffc4",
+    dim: "#2fa84f",
+    accent: "#00ff41",
+    green: "#00ff41",
+    red: "#ff3355",
+    yellow: "#d4ff3d",
+    purple: "#7dffa0",
+    orange: "#ffb000",
+    fingers: ["#00c853", "#69f0ae", "#00ff41", "#b9f6ca", "#2e7d32"],
+    layers: ["#1b5e20", "#00e676", "#a5d6a7"],
+};
+
+fn terminal_theme(t: &Terminal) -> ThemeProps {
+    let mut props = dark_theme();
+    let (window, pane, item, accent) = (hex(t.window), hex(t.pane), hex(t.item), hex(t.accent));
+    let text = hex(t.text);
+    let base = [
+        (semantic::SURFACE_WINDOW, window),
+        (semantic::SURFACE_PANE_BODY, pane),
+        (semantic::SURFACE_PANE_HEADER, window),
+        (semantic::SURFACE_SUBPANE_BODY, pane),
+        (semantic::SURFACE_SUBPANE_HEADER, item),
+        (semantic::SURFACE_GROUP, item),
+        (semantic::SURFACE_DIALOG, pane),
+        (semantic::SURFACE_MENU, pane),
+        (semantic::BORDER_DEFAULT, hex(t.border)),
+        (semantic::TEXT_DEFAULT, text),
+        (semantic::TEXT_DIM, hex(t.dim)),
+        (semantic::TEXT_DISABLED, text.with_alpha(0.4)),
+        (semantic::TEXT_ON_ACCENT, window),
+        (semantic::FILL_ACCENT_DEFAULT, accent),
+        (semantic::FILL_ACCENT_HOVER, accent.lighter(0.05)),
+        (semantic::FILL_ACCENT_PRESSED, accent.lighter(0.1)),
+        (semantic::FILL_SOLID_DEFAULT, item.lighter(0.04)),
+        (semantic::FILL_SOLID_HOVER, item.lighter(0.08)),
+        (semantic::FILL_SOLID_PRESSED, item.lighter(0.12)),
+        (semantic::FILL_ITEM_HOVER, pane.lighter(0.05)),
+        (semantic::FILL_ITEM_PRESSED, pane.lighter(0.1)),
+        (semantic::FILL_FIELD_DEFAULT, item),
+        (semantic::FILL_FIELD_HOVER, item.lighter(0.05)),
+        (semantic::FILL_FIELD_PRESSED, item.lighter(0.1)),
+        (semantic::FOCUS_RING, accent.with_alpha(0.5)),
+    ];
+    props.semantic_base.extend(base);
+    // The controls take the text color, not white: the accent buttons have the window's.
+    for token in [
+        feathers_tokens::BUTTON_TEXT,
+        feathers_tokens::SLIDER_TEXT,
+        feathers_tokens::MENUITEM_TEXT,
+        feathers_tokens::TEXT_INPUT_TEXT,
+        feathers_tokens::LISTROW_TEXT,
+    ] {
+        props.token_assignments.insert(token, semantic::TEXT_DEFAULT);
+    }
+    props.semantic_overrides = HashMap::new();
+    let (green, red, yellow) = (hex(t.green), hex(t.red), hex(t.yellow));
+    set(&mut props, &tokens::KEYBOARD_CASE, pane);
+    set(&mut props, &tokens::KEY_BG, item);
+    set(&mut props, &tokens::KEY_BORDER, hex(t.border));
+    set(&mut props, &tokens::KEY_TEXT, text);
+    set(&mut props, &tokens::KEY_TARGET, green);
+    set(&mut props, &tokens::KEY_HOLD, yellow);
+    set(&mut props, &tokens::KEY_SHIFT, hex(t.purple));
+    set(&mut props, &tokens::KEY_ERASE, red);
+    set(&mut props, &tokens::KEY_TEXT_ON_HINT, window);
+    set(&mut props, &tokens::CHAR_PENDING, hex(t.dim));
+    set(&mut props, &tokens::CHAR_CURRENT, text);
+    set(&mut props, &tokens::CHAR_CORRECT, green);
+    set(&mut props, &tokens::CHAR_WRONG, red);
+    set(&mut props, &tokens::CHAR_WRONG_BG, red.with_alpha(0.25));
+    set(&mut props, &tokens::CHAR_RETOUCHED, yellow);
+    set(&mut props, &tokens::SELECTION, accent.with_alpha(0.3));
+    set(&mut props, &tokens::CURSOR, accent);
+    set(&mut props, &tokens::SPARK_OK, accent);
+    set(&mut props, &tokens::NEAR_MISS, hex(t.orange));
+    set(&mut props, &tokens::SPARK_ERROR, red);
+    set(&mut props, &tokens::PROGRESS_TRACK, item);
+    set(&mut props, &tokens::PROGRESS_BAR, accent);
+    set_fingers(&mut props, t.fingers, t.layers);
+    props
 }
 
 pub fn dark_theme() -> ThemeProps {

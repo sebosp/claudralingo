@@ -269,6 +269,8 @@ pub struct Progress {
     pub warmup_return: Option<ExerciseMode>,
     /// The minutes of practice of a day, for the streak.
     pub daily_goal_minutes: u32,
+    /// For the phones: no keyboard, the finger tips at the bottom and the layer to hold.
+    pub compact: bool,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -317,6 +319,7 @@ impl Default for Progress {
             lock_lessons: true,
             warmup_return: None,
             daily_goal_minutes: 10,
+            compact: cfg!(any(target_os = "android", target_os = "ios")),
             layouts: BTreeMap::new(),
         }
     }

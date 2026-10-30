@@ -39,7 +39,7 @@ pub struct HandsPlugin;
 
 impl Plugin for HandsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_hands, update_hands).chain().after(crate::game::GameSystems));
+        app.add_systems(Update, (spawn_hands, update_hands, compact_hands).chain().after(crate::game::GameSystems));
     }
 }
 
@@ -95,6 +95,7 @@ fn spawn_hand(commands: &mut Commands, root: Entity, left: bool) {
         spawn_finger(commands, fingers, Finger { finger, left }, FINGER_WIDTH, height, radius);
     }
     commands.spawn((
+        Palm,
         Node {
             width: px(4.0 * FINGER_WIDTH + 3.0 * 5.0 + 6.0),
             height: px(28),
@@ -111,10 +112,73 @@ fn spawn_hand(commands: &mut Commands, root: Entity, left: bool) {
     }
 }
 
+/// The palm under the fingers, hidden in the compact view.
+#[derive(Component)]
+struct Palm;
+
+/// Between the hands in the compact view: the layer to hold for the next key, the keyboard
+/// is not shown.
+#[derive(Component)]
+struct LayerChip;
+
 fn spawn_hands(roots: Query<Entity, Added<HandsRoot>>, mut commands: Commands) {
     for root in &roots {
         spawn_hand(&mut commands, root, true);
+        commands.spawn((
+            Text::new(""),
+            TextFont { font_size: FontSize::Px(15.0), ..default() },
+            TextColor(Color::NONE),
+            Node {
+                display: Display::None,
+                padding: UiRect::axes(px(10), px(3)),
+                margin: UiRect::bottom(px(8)),
+                border: UiRect::all(px(2)),
+                border_radius: BorderRadius::all(px(8)),
+                ..default()
+            },
+            BorderColor::all(Color::NONE),
+            BackgroundColor(Color::NONE),
+            LayerChip,
+            ChildOf(root),
+        ));
         spawn_hand(&mut commands, root, false);
+    }
+}
+
+/// The compact view: the palms hidden, the chip of the layer shown.
+fn compact_hands(
+    progress: Res<crate::progress::Progress>,
+    coach: Res<Coach>,
+    layout: Res<ActiveLayout>,
+    theme: Res<UiTheme>,
+    mut palms: Query<&mut Node, (With<Palm>, Without<LayerChip>)>,
+    mut chips: Query<(&mut Node, &mut Text, &mut TextColor, &mut BorderColor, &mut BackgroundColor), With<LayerChip>>,
+) {
+    let compact = progress.compact;
+    for mut node in &mut palms {
+        let display = if compact { Display::None } else { Display::Flex };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    let layout = &layout.0;
+    let layer = coach.target.and_then(|t| layout.plan(t)).map_or(0, |p| p.layer as usize);
+    for (mut node, mut text, mut color, mut border, mut background) in &mut chips {
+        let display = if compact && layout.layer_names.len() > 1 { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        let name = layout.layer_names.get(layer).copied().unwrap_or("Base");
+        let label = if layer == 0 { name.to_string() } else { format!("hold {name}") };
+        if text.0 != label {
+            text.0 = label;
+        }
+        let tint = theme.color(&tokens::LAYERS[layer.min(tokens::LAYERS.len() - 1)]);
+        // The text in the text color, the layer in the frame and the fill.
+        let ink = theme.color(&tokens::KEY_TEXT);
+        color.0 = if layer == 0 { ink.with_alpha(0.5) } else { ink };
+        *border = BorderColor::all(if layer == 0 { Color::NONE } else { tint });
+        background.0 = if layer == 0 { Color::NONE } else { tint.with_alpha(0.35) };
     }
 }
 

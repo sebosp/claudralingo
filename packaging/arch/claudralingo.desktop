@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Claudralingo
+GenericName=Typing Tutor
+Comment=Touch typing for split keyboards and HSK hanzi writing
+Exec=claudralingo
+Icon=claudralingo
+Terminal=false
+Categories=Education;Game;
+Keywords=typing;keyboard;corne;zmk;hanzi;chinese;hsk;
+StartupWMClass=claudralingo

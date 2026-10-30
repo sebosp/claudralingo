@@ -6,7 +6,7 @@
 //! touches are wrong until the errors are erased with backspace, and the retyped characters count
 //! as errors.
 use super::accuracy::Accuracy;
-use super::{BACKSPACE, HYPER_BACKSPACE, KbdGrid, UPSYM};
+use super::{BACKSPACE, HYPER_BACKSPACE, KbdGrid};
 
 /// The fluidness exercises are not logged with less touches than this, `MIN_CHARS_TO_LOG`.
 pub const MIN_CHARS_TO_LOG: usize = 500;
@@ -185,8 +185,8 @@ impl Tutor {
         }
 
         let real_chr = self.text[self.cursor];
-        // Minimizing the line breaking bug.
-        let user_chr = if user_chr == UPSYM && real_chr == ' ' { ' ' } else { user_chr };
+        // Klavaro takes Enter for a space too ("the line breaking bug"), not here: Space is
+        // the habit to build, Enter only ends the lines (¶).
 
         if self.stop_on_error {
             return self.eval_in_place(user_chr, real_chr, now, accur, grid);
@@ -317,6 +317,16 @@ mod tests {
     }
 
     #[test]
+    fn enter_is_not_a_space() {
+        let mut tutor = Tutor::new("fj fj\u{b6}\n");
+        let mut accur = Accuracy::default();
+        let mut t = 0.0;
+        type_str(&mut tutor, "fj\u{b6}", &mut t, &mut accur);
+        assert_eq!(tutor.cursor, 2);
+        assert_eq!(tutor.states[2], CharState::Wrong);
+    }
+
+    #[test]
     fn a_miss_keeps_the_cursor() {
         let mut tutor = Tutor::new("fj fj\u{b6}\n");
         let mut accur = Accuracy::default();
@@ -360,14 +370,5 @@ mod tests {
         assert_eq!(results.n_touchs, 6);
         assert_eq!(results.n_errors, 2);
         assert_eq!(accur.terror[0].ch, 'j');
-    }
-
-    #[test]
-    fn enter_types_a_space_at_the_end_of_a_line() {
-        let mut tutor = Tutor::new("a b\u{b6}\n");
-        let mut accur = Accuracy::default();
-        let mut t = 0.0;
-        assert_eq!(type_str(&mut tutor, "a\u{b6}b\u{b6}", &mut t, &mut accur), Outcome::Finished);
-        assert_eq!(tutor.results.unwrap().accuracy, 100.0);
     }
 }

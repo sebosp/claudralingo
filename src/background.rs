@@ -30,7 +30,8 @@ pub struct BackgroundMaterial {
     color2: Vec4,
     #[uniform(3)]
     color3: Vec4,
-    /// The time, unused, the opacity of the edges and vertices, the columns of the mesh.
+    /// The time, the style (1 the falling code of the Matrix), the opacity of the edges and
+    /// vertices, the columns of the mesh.
     #[uniform(4)]
     params: Vec4,
     /// The areas where the mesh blurs, in uv units: the text to type and the hands.
@@ -169,12 +170,11 @@ fn update_background(
         [material.color0, material.color1, material.color2, material.color3] = palette;
     }
     // Quiet on the dark windows, a little stronger on the light ones.
-    let edges = match *mode {
-        ThemeMode::Dark => 0.13,
-        ThemeMode::Light => 0.24,
-    } * progress.background.strength();
+    let edges = if mode.is_dark() { 0.13 } else { 0.24 } * progress.background.strength();
+    // The Matrix: the code falls instead of the mesh.
+    let style = if *mode == ThemeMode::Matrix { 1.0 } else { 0.0 };
     // A wrapped time keeps the precision of the shader, reduced motion stops the mesh.
     let t = if progress.reduce_motion { 120.0 } else { (time.elapsed_secs_f64() % 10_000.0) as f32 };
-    material.params = Vec4::new(t, 0.0, edges, COLUMNS);
+    material.params = Vec4::new(t, style, edges, COLUMNS);
     [material.blur0, material.blur1] = blur;
 }

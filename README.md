@@ -192,6 +192,27 @@ against the last time of the same lesson; a new best speed for the lesson is con
 the gain and the date of the previous record. The keys of the moment (Enter, Backspace, Tab,
 ← → for the lessons) are in the bar at the bottom.
 
+## Themes and the compact view
+
+Settings, Theme: Dark, Light, Tokyo Night, Gruvbox (dark) and Matrix (green on black, the code
+falling in the background, no hands). "Compact" (on by default on Android and iOS) hides the
+keyboard: the finger tips sit at the bottom with the layer to hold for the next key between them.
+Enter is not a space: only Space moves to the next group of letters, Enter ends the lines (¶).
+
+## Install on Arch Linux
+
+`packaging/arch/PKGBUILD` builds `claudralingo-git` from GitHub, for the AUR:
+
+```sh
+cd packaging/arch && makepkg -si
+```
+
+## Pens
+
+The Wayland backend of Bevy 0.20 (winit 0.30) has no tablet support: a pen works as the
+compositor emulates it. `CLAUDRALINGO_X11=1 claudralingo` runs through XWayland instead,
+`CLAUDRALINGO_INPUT_LOG=1` prints the mouse, touch and picking events to see what a pen sends.
+
 ## Keyboards
 
 "QWERTY laptop (US)" has no navigation block nor arrows. The Corne 3x5+3 has the Typeractive

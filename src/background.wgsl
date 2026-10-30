@@ -16,7 +16,7 @@ struct UiVertexOutput {
 @group(1) @binding(1) var<uniform> color1: vec4<f32>;
 @group(1) @binding(2) var<uniform> color2: vec4<f32>;
 @group(1) @binding(3) var<uniform> color3: vec4<f32>;
-// x the time in seconds, y unused, z the opacity of the edges and the vertices, w the number of
+// x the time in seconds, y the style (1 the falling code of the Matrix), z the opacity of the edges and the vertices, w the number of
 // columns of the mesh.
 @group(1) @binding(4) var<uniform> params: vec4<f32>;
 // The areas where the mesh blurs, in uv units: min x, min y, max x, max y.
@@ -96,8 +96,51 @@ fn life(id: vec2<f32>, k: f32, t: f32) -> f32 {
     return smoothstep(0.3, 0.95, s);
 }
 
+// The falling code of the Matrix: columns of glyphs, each with a bright head falling at its
+// own speed and a fading trail, the glyphs changing now and then. Dimmed under the text and
+// the hands.
+fn rain(in: UiVertexOutput) -> vec4<f32> {
+    let t = params.x;
+    let px = in.uv * in.size;
+    let cell = vec2<f32>(14.0, 18.0);
+    let col = floor(px.x / cell.x);
+    let row = floor(px.y / cell.y);
+    let rows = in.size.y / cell.y;
+    let h = hash1(vec2<f32>(col, 7.0));
+    // Half of the columns are quiet.
+    if hash1(vec2<f32>(col, 11.0)) < 0.5 {
+        return vec4<f32>(0.0);
+    }
+    let speed = 3.0 + 7.0 * h;
+    // The head, in rows, wrapping below the window with a pause.
+    let span = rows + 18.0 + 30.0 * hash1(vec2<f32>(col, 3.0));
+    let head = (t * speed + h * 400.0) % span;
+    let behind = head - row;
+    if behind < 0.0 {
+        return vec4<f32>(0.0);
+    }
+    let trail = exp(-behind / (6.0 + 10.0 * h));
+    // A glyph: 5x7 dots on and off, changing with time on some cells.
+    let local = (px - vec2<f32>(col, row) * cell) / cell;
+    let dot = floor(local * vec2<f32>(5.0, 7.0));
+    let change = floor(t * (0.5 + 2.0 * hash1(vec2<f32>(col, row))));
+    let on = hash1(vec2<f32>(col * 31.0 + dot.x, row * 17.0 + dot.y + change * 13.0)) > 0.55;
+    let inside = local.x > 0.1 && local.x < 0.9 && local.y > 0.08 && local.y < 0.92;
+    if !on || !inside {
+        return vec4<f32>(0.0);
+    }
+    let px_blur = max(blur_in(px, blur0, in.size, 0.04 * in.size.y), blur_in(px, blur1, in.size, 0.04 * in.size.y));
+    let bright = select(trail, 1.0, behind < 1.0);
+    let color = mix(vec3<f32>(0.0, 0.55, 0.15), vec3<f32>(0.75, 1.0, 0.8), select(0.0, 1.0, behind < 1.0));
+    let alpha = min(1.0, params.z * 4.0) * bright * mix(1.0, 0.25, px_blur);
+    return vec4<f32>(color, alpha);
+}
+
 @fragment
 fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
+    if params.y > 0.5 {
+        return rain(in);
+    }
     let t = params.x;
     let cell = in.size.x / max(params.w, 1.0);
     let p = in.uv * in.size / cell;

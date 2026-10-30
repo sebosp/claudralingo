@@ -2,10 +2,19 @@ use bevy::prelude::*;
 use claudralingo::ClaudralingoPlugin;
 
 fn main() {
+    // `CLAUDRALINGO_X11=1`: through XWayland, its pens send the presses as buttons; the
+    // Wayland backend of winit 0.30 has no tablet support and takes what the compositor emulates.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("CLAUDRALINGO_X11").is_some() {
+        // SAFETY: before any thread is started.
+        unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
+    }
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Claudralingo".into(),
+            // The app id of Wayland and the class of X11, as the desktop file.
+            name: Some("claudralingo".into()),
             resolution: (1280, 880).into(),
             // The web build fills the page, see index.html.
             canvas: Some("#claudralingo".into()),
@@ -17,7 +26,42 @@ fn main() {
     .add_plugins(ClaudralingoPlugin);
     #[cfg(not(target_arch = "wasm32"))]
     snapshot::add(&mut app);
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("CLAUDRALINGO_INPUT_LOG").is_some() {
+        app.add_systems(Update, log_input);
+    }
     app.run();
+}
+
+/// `CLAUDRALINGO_INPUT_LOG=1`: the mouse, touch and picking events on stderr, to see what a pen
+/// sends.
+#[cfg(not(target_arch = "wasm32"))]
+fn log_input(
+    mut buttons: MessageReader<bevy::input::mouse::MouseButtonInput>,
+    mut touches: MessageReader<TouchInput>,
+    mut moved: MessageReader<CursorMoved>,
+    mut presses: MessageReader<bevy::picking::events::PointerPress>,
+    mut drags: MessageReader<bevy::picking::events::PointerDrag>,
+    mut moves: Local<u32>,
+) {
+    for b in buttons.read() {
+        eprintln!("mouse button {:?} {:?}", b.button, b.state);
+    }
+    for t in touches.read() {
+        eprintln!("touch {:?} id {} at {:?} force {:?}", t.phase, t.id, t.position, t.force);
+    }
+    for m in moved.read() {
+        *moves += 1;
+        if moves.is_multiple_of(30) {
+            eprintln!("cursor moved {} times, at {:?}", *moves, m.position);
+        }
+    }
+    for p in presses.read() {
+        eprintln!("picking press {:?} on {:?} by {:?}", p.button, p.entity, p.pointer.id);
+    }
+    for d in drags.read() {
+        eprintln!("picking drag {:?} by {:?}", d.delta, d.pointer.id);
+    }
 }
 
 /// `CLAUDRALINGO_SCREENSHOT=out.png` saves a screenshot and exits, after typing the characters of
@@ -170,8 +214,8 @@ mod snapshot {
         // `CLAUDRALINGO_TOGGLE_THEME` switches the theme like the toggle switch does.
         if *frame == 40 && std::env::var_os("CLAUDRALINGO_TOGGLE_THEME").is_some() {
             *theme = match *theme {
-                claudralingo::theme::ThemeMode::Dark => claudralingo::theme::ThemeMode::Light,
                 claudralingo::theme::ThemeMode::Light => claudralingo::theme::ThemeMode::Dark,
+                _ => claudralingo::theme::ThemeMode::Light,
             };
         }
         // The help of the first start, kept with `CLAUDRALINGO_HELP`, `CLAUDRALINGO_SETTINGS`
