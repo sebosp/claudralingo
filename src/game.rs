@@ -204,10 +204,11 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     let mut lesson = lesson;
     let mut char_set = char_set;
     let text = match mode {
-        // The drill, then real words of the keys learned so far.
+        // The drill, then real words of the keys of the lesson, when they make enough of them:
+        // the lesson shows its keys, the words use only those.
         ExerciseMode::Basic => {
             let mut text = klavaro::basic::draw_lesson(&char_set);
-            if let Some(words) = crate::course::word_lines(&crate::course::learned_chars(grid, lesson), 2) {
+            if let Some(words) = crate::course::word_lines(&char_set, 2) {
                 text.push_str(&words);
             }
             text

@@ -174,8 +174,9 @@ mod tests {
         assert!(words_of(&learned).iter().all(|w| w.chars().all(|c| learned.contains(&c))));
         let text = word_lines(&learned, 2).expect("enough words");
         assert_eq!(text.matches(UPSYM).count(), 2);
-        // Two keys make no words.
+        // Two keys make no words, nor h j k l ' (lesson 9).
         assert!(word_lines(&learned_chars(&grid, 1), 2).is_none());
+        assert!(word_lines(&lesson_char_set(9, &grid), 2).is_none());
     }
 
     #[test]

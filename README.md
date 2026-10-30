@@ -169,8 +169,9 @@ keymap away, see `corne36` in `src/layout.rs`.
 
 - **Layer course** (mode): the keys of each layer row by row (Lower: top row, home row...), then
   the layer whole, then all the layers. A keyboard without layers has its symbols instead.
-- **Real words**: the basic lessons end with two lines of words of Klavaro's dictionary made of
-  the keys learned so far, once there are enough of them.
+- **Real words**: a basic lesson ends with two lines of words of Klavaro's dictionary made of
+  its own keys only, when they make enough words (the home row of lesson 10 does, `h j k l '`
+  of lesson 9 does not).
 - **Welcome back**: at the start, continue where the last session stopped (Enter), or warm up
   first on the keys that need it most, their misses weighing more when they were not practiced
   for a while (a spaced repetition), then back to the lesson. The warm-up is also in the menu.
