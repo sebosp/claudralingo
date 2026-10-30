@@ -301,7 +301,11 @@ fn detect_row_clears(
             continue;
         }
         cleared.1[i] = true;
-        let slips = (*start..*end).filter(|c| tutor.states[*c] != CharState::Correct).count();
+        // The slips: the runs of characters not typed right at once, one slip with the keys
+        // typed on before backspace.
+        let slips = (*start..*end)
+            .filter(|c| tutor.states[*c] != CharState::Correct && (*c == *start || tutor.states[*c - 1] == CharState::Correct))
+            .count();
         let Ok((node, transform, computed)) = lines.get(*entity) else {
             continue;
         };

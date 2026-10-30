@@ -74,8 +74,11 @@ pub struct Tutor {
     last_touch: f64,
     start: f64,
     pub results: Option<Results>,
-    /// A wrong key does not move the cursor: the same character is typed again, the rest of
-    /// a word is not marked wrong by one miss. Klavaro moves on and asks for backspace.
+    /// A slip is one error: the first wrong key counts, not the keys typed after it nor the
+    /// ones typed again after backspace. Klavaro counts every character typed again.
+    pub one_error_per_slip: bool,
+    /// A wrong key does not move the cursor: the same character is typed again, without
+    /// backspace (the setting "Fix mistakes with Backspace" off).
     pub stop_on_error: bool,
     /// The character at the cursor was missed, it counts as an error once typed right.
     missed_here: bool,
@@ -97,14 +100,15 @@ impl Tutor {
             last_touch: 0.0,
             start: 0.0,
             results: None,
-            stop_on_error: true,
+            one_error_per_slip: true,
+            stop_on_error: false,
             missed_here: false,
         }
     }
 
-    /// Klavaro's way: a wrong key moves on, the errors are erased with backspace.
+    /// Klavaro's way of counting: every character typed again after backspace is an error.
     pub fn klavaro(text: &str) -> Self {
-        Tutor { stop_on_error: false, ..Tutor::new(text) }
+        Tutor { one_error_per_slip: false, ..Tutor::new(text) }
     }
 
     pub fn current_char(&self) -> Option<char> {
@@ -185,12 +189,11 @@ impl Tutor {
         }
 
         let real_chr = self.text[self.cursor];
-        // Klavaro takes Enter for a space too ("the line breaking bug"), not here: Space is
-        // the habit to build, Enter only ends the lines (¶).
-
         if self.stop_on_error {
             return self.eval_in_place(user_chr, real_chr, now, accur, grid);
         }
+        // Klavaro takes Enter for a space too ("the line breaking bug"), not here: Space is
+        // the habit to build, Enter only ends the lines (¶).
 
         let outcome = if user_chr == real_chr && self.retro_pos == 0 {
             self.n_touchs += 1;
@@ -199,7 +202,9 @@ impl Tutor {
             self.last_touch = now;
             if self.correcting != 0 {
                 self.states[self.cursor] = CharState::Retouched;
-                self.n_errors += 1;
+                if !self.one_error_per_slip {
+                    self.n_errors += 1;
+                }
                 Outcome::Correct { expected: real_chr, touch_time: None }
             } else {
                 self.states[self.cursor] = CharState::Correct;
@@ -213,6 +218,9 @@ impl Tutor {
             let first = self.retro_pos == 1;
             if first {
                 accur.wrong(real_chr, grid);
+                if self.one_error_per_slip {
+                    self.n_errors += 1;
+                }
             }
             Outcome::Wrong { expected: real_chr, typed: user_chr, first }
         };
@@ -322,24 +330,35 @@ mod tests {
         let mut accur = Accuracy::default();
         let mut t = 0.0;
         type_str(&mut tutor, "fj\u{b6}", &mut t, &mut accur);
-        assert_eq!(tutor.cursor, 2);
         assert_eq!(tutor.states[2], CharState::Wrong);
+        assert_eq!(tutor.retro_pos, 1);
     }
 
     #[test]
-    fn a_miss_keeps_the_cursor() {
-        let mut tutor = Tutor::new("fj fj\u{b6}\n");
+    fn without_backspace_the_cursor_waits() {
+        let mut tutor = Tutor { stop_on_error: true, ..Tutor::new("fj fj\u{b6}\n") };
         let mut accur = Accuracy::default();
         let mut t = 0.0;
-        // j missed twice: the cursor waits on it, the rest of the word is not wrong.
         type_str(&mut tutor, "fkk", &mut t, &mut accur);
         assert_eq!(tutor.cursor, 1);
-        assert_eq!(tutor.states[1], CharState::Wrong);
         assert_eq!(tutor.states[2], CharState::Untouched);
         type_str(&mut tutor, "j fj\u{b6}", &mut t, &mut accur);
         assert_eq!(tutor.query, Query::End);
+        assert_eq!(tutor.n_errors, 1);
+    }
+
+    #[test]
+    fn a_slip_is_one_error() {
+        let mut tutor = Tutor::new("fj fj\u{b6}\n");
+        let mut accur = Accuracy::default();
+        let mut t = 0.0;
+        // j missed, then two more keys typed on: one slip, back with backspace.
+        type_str(&mut tutor, "fkxx", &mut t, &mut accur);
+        assert_eq!(tutor.retro_pos, 3);
+        assert_eq!(tutor.expected(), Some(BACKSPACE));
+        type_str(&mut tutor, "\u{8}\u{8}\u{8}j fj\u{b6}", &mut t, &mut accur);
+        assert_eq!(tutor.query, Query::End);
         assert_eq!(tutor.states[1], CharState::Retouched);
-        // One error for the character, whatever the misses.
         assert_eq!(tutor.n_errors, 1);
     }
 

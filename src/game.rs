@@ -153,7 +153,6 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         let mut progress = Progress::load();
-        start_with_warmup(&mut progress);
         let layout = progress.layout.build();
         let grid = layout.klavaro_grid();
         let exercise = generate(&grid, &layout, &mut progress);
@@ -244,7 +243,11 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     Exercise {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-        tutor: Tutor::new(&text),
+        tutor: {
+            let mut tutor = Tutor::new(&text);
+            tutor.stop_on_error = !progress.fix_with_backspace;
+            tutor
+        },
         mode,
         lesson,
         finger,
@@ -257,19 +260,18 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     }
 }
 
-/// A session started after a pause begins with the weak keys, then goes back to its mode.
-fn start_with_warmup(progress: &mut Progress) {
-    const PAUSE_SECONDS: u64 = 4 * 3600;
-    let now = crate::progress::now_unix_seconds();
-    let last = progress.layouts.values().flat_map(|l| l.sessions.last()).map(|s| s.finished_at).max();
-    let mode = progress.mode;
-    if !mode.is_typing() || mode == ExerciseMode::Review || last.is_none_or(|t| now.saturating_sub(t) < PAUSE_SECONDS) {
-        return;
+/// The keys of a warm-up, at least three with enough touches.
+pub fn warmup_keys(progress: &mut Progress) -> Vec<char> {
+    let keys = crate::course::weak_keys(progress.current(), crate::progress::now_unix_seconds(), 6);
+    if keys.len() >= 3 { keys } else { Vec::new() }
+}
+
+/// The warm-up on the weak keys, then the mode of the session again.
+pub fn start_warmup(progress: &mut Progress) {
+    if progress.mode != ExerciseMode::Review {
+        progress.warmup_return = Some(progress.mode);
     }
-    if crate::course::weak_keys(progress.current(), now, 6).len() >= 3 {
-        progress.warmup_return = Some(mode);
-        progress.mode = ExerciseMode::Review;
-    }
+    progress.mode = ExerciseMode::Review;
 }
 
 fn new_exercise(
@@ -387,6 +389,11 @@ fn read_keys(
         let open = *panel != crate::ui::Panel::None;
         if down && event.logical_key == Key::F1 {
             panel.toggle(crate::ui::Panel::Help);
+            continue;
+        }
+        // Enter on the welcome continues where the last session stopped.
+        if down && *panel == crate::ui::Panel::Welcome && event.logical_key == Key::Enter {
+            *panel = crate::ui::Panel::None;
             continue;
         }
         if down && open && event.logical_key == Key::Escape {

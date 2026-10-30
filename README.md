@@ -171,9 +171,9 @@ keymap away, see `corne36` in `src/layout.rs`.
   the layer whole, then all the layers. A keyboard without layers has its symbols instead.
 - **Real words**: the basic lessons end with two lines of words of Klavaro's dictionary made of
   the keys learned so far, once there are enough of them.
-- **Warm-up**: a session started after 4 hours begins with the keys that need it most, their
-  misses weighing more when they were not practiced for a while (a spaced repetition), then
-  goes back to its mode. It is also in the menu.
+- **Welcome back**: at the start, continue where the last session stopped (Enter), or warm up
+  first on the keys that need it most, their misses weighing more when they were not practiced
+  for a while (a spaced repetition), then back to the lesson. The warm-up is also in the menu.
 - **Locked lessons** (setting, on by default): a lesson of the basic and the layer course, and a
   hanzi level, opens when the previous one is passed.
 - **Auto shift**: a capital by a key held too long, or a capital missed, is named above the
@@ -185,8 +185,10 @@ keymap away, see `corne36` in `src/layout.rs`.
 
 ## At the end of an exercise
 
-A wrong key keeps the cursor on its character, red until it is typed right: one miss does not
-mark the rest of the word, and it counts as one error. At the end, the bar at the top shows the
+A wrong key moves on, the keys typed after it stay red until Backspace brings the cursor back
+to the last right character: the motion to learn on a Corne. A slip is one error, however many
+keys follow it. Settings, "Fix mistakes with Backspace" off: the cursor waits on the missed key
+instead. At the end, the bar at the top shows the
 words per minute, the accuracy and the fluidness, with ▲ (better), ▼ (worse) or ● (the same)
 against the last time of the same lesson; a new best speed for the lesson is congratulated with
 the gain and the date of the previous record. The keys of the moment (Enter, Backspace, Tab,

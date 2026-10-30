@@ -87,6 +87,7 @@ enum Setting {
     Sound,
     LockLessons,
     Compact,
+    FixWithBackspace,
 }
 
 #[derive(Component, Default, Clone)]
@@ -153,6 +154,8 @@ pub enum Panel {
     Settings,
     Lessons,
     Stats,
+    /// At the start: continue where the last session stopped, or warm up first.
+    Welcome,
 }
 
 impl Panel {
@@ -213,6 +216,7 @@ impl Plugin for UiPlugin {
                 fill_lessons.run_if(resource_changed::<Panel>),
                 show_hands,
                 show_hanzi,
+                fill_welcome,
                 update_trends,
                 update_actions,
                 arrow_lessons.after(crate::game::GameSystems),
@@ -387,6 +391,8 @@ fn root(
             @settings_overlay(layouts, backgrounds, themes)
             --
             @lessons_overlay()
+            --
+            @welcome_overlay()
             --
             @crate::stats::overlay()
         ]
@@ -576,6 +582,8 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         }
                         on(on_background_change)
                     ]
+                    --
+                    @setting_checkbox(Setting::FixWithBackspace, "Fix mistakes with Backspace: off, the cursor waits on the missed key")
                     --
                     @setting_checkbox(Setting::LockLessons, "Lock lessons: pass a lesson (95%) to open the next one")
                     --
@@ -988,6 +996,7 @@ impl Setting {
             Setting::Sound => progress.sound,
             Setting::LockLessons => progress.lock_lessons,
             Setting::Compact => progress.compact,
+            Setting::FixWithBackspace => progress.fix_with_backspace,
         }
     }
 }
@@ -1033,6 +1042,7 @@ fn on_setting_change(
         Setting::Sound => progress.sound = change.value,
         Setting::LockLessons => progress.lock_lessons = change.value,
         Setting::Compact => progress.compact = change.value,
+        Setting::FixWithBackspace => progress.fix_with_backspace = change.value,
     }
     progress.save();
     release_focus(&mut focus);
@@ -1301,6 +1311,123 @@ fn first_help(mut progress: ResMut<Progress>, mut panel: ResMut<Panel>) {
         *panel = Panel::Help;
         progress.help_seen = true;
         progress.save();
+    } else if progress.layouts.values().any(|l| !l.sessions.is_empty()) {
+        *panel = Panel::Welcome;
+    }
+}
+
+#[derive(Component, Default, Clone)]
+struct WelcomeOverlay;
+#[derive(Component, Default, Clone)]
+struct WelcomeText;
+#[derive(Component, Default, Clone)]
+struct WarmupButton;
+#[derive(Component, Default, Clone)]
+struct WarmupCaption;
+
+fn welcome_overlay() -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            display: Display::None,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6))
+        GlobalZIndex(50)
+        WelcomeOverlay
+        Children [
+            @group()
+            Node {
+                width: px(520),
+            }
+            Children [
+                @group_header() Children [ @label("Welcome back") ]
+                --
+                @group_body()
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(12),
+                }
+                Children [
+                    @label("") WelcomeText
+                    --
+                    @FeathersButton {
+                        @caption: bsn! { @caption("Continue where you left off (Enter)") }
+                        @variant: ButtonVariant::Primary,
+                    }
+                    on(welcome_continue)
+                    --
+                    @FeathersButton {
+                        @caption: bsn! { @caption("") WarmupCaption }
+                    }
+                    WarmupButton
+                    on(welcome_warmup)
+                ]
+            ]
+        ]
+    }
+}
+
+fn welcome_continue(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    *panel = Panel::None;
+    release_focus(&mut focus);
+}
+
+fn welcome_warmup(
+    _: On<Activate>,
+    mut panel: ResMut<Panel>,
+    mut progress: ResMut<Progress>,
+    mut new_exercise: MessageWriter<NewExercise>,
+    mut focus: ResMut<InputFocus>,
+) {
+    crate::game::start_warmup(&mut progress);
+    progress.save();
+    new_exercise.write_default();
+    *panel = Panel::None;
+    release_focus(&mut focus);
+}
+
+/// What the last session was, and the keys of the warm-up.
+fn fill_welcome(
+    panel: Res<Panel>,
+    mut progress: ResMut<Progress>,
+    mut texts: Query<&mut Text, (With<WelcomeText>, Without<WarmupCaption>)>,
+    mut captions: Query<&mut Text, With<WarmupCaption>>,
+    mut buttons: Query<&mut Node, (With<WarmupButton>, Without<WelcomeOverlay>)>,
+    mut overlays: Query<&mut Node, With<WelcomeOverlay>>,
+) {
+    if !panel.is_changed() {
+        return;
+    }
+    for mut node in &mut overlays {
+        node.display = if *panel == Panel::Welcome { Display::Flex } else { Display::None };
+    }
+    if *panel != Panel::Welcome {
+        return;
+    }
+    let mode = progress.mode;
+    let current = progress.current();
+    let place = match mode {
+        ExerciseMode::Basic => format!("{}, lesson {}", mode.name(), current.basic_lesson),
+        ExerciseMode::Layers => format!("{}, lesson {}", mode.name(), current.layer_lesson),
+        ExerciseMode::Hanzi => format!("{}, level {}", mode.name(), progress.hanzi.level + 1),
+        _ => mode.name().to_string(),
+    };
+    let last = progress.layouts.values().flat_map(|l| l.sessions.last()).map(|s| s.finished_at).max();
+    let when = last.map(|t| format!(", on {}", crate::stats::short_date(t))).unwrap_or_default();
+    for mut text in &mut texts {
+        text.0 = format!("Last time: {place}{when}.");
+    }
+    let keys = crate::game::warmup_keys(&mut progress);
+    let shown: Vec<String> = keys.iter().copied().map(display_char).collect();
+    for mut caption in &mut captions {
+        caption.0 = format!("Warm up first on your weak keys: {}", shown.join(" "));
+    }
+    for mut node in &mut buttons {
+        node.display = if keys.is_empty() { Display::None } else { Display::Flex };
     }
 }
 

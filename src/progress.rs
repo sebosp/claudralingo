@@ -271,6 +271,9 @@ pub struct Progress {
     pub daily_goal_minutes: u32,
     /// For the phones: no keyboard, the finger tips at the bottom and the layer to hold.
     pub compact: bool,
+    /// A wrong key moves on and is fixed with Backspace (the motion to learn on a Corne);
+    /// off, the cursor waits on the missed key.
+    pub fix_with_backspace: bool,
     pub layouts: BTreeMap<String, LayoutProgress>,
 }
 
@@ -320,6 +323,7 @@ impl Default for Progress {
             warmup_return: None,
             daily_goal_minutes: 10,
             compact: cfg!(any(target_os = "android", target_os = "ios")),
+            fix_with_backspace: true,
             layouts: BTreeMap::new(),
         }
     }
