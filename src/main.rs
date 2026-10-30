@@ -2,10 +2,8 @@ use bevy::prelude::*;
 use claudralingo::ClaudralingoPlugin;
 
 fn main() {
-    // `CLAUDRALINGO_X11=1`: through XWayland, its pens send the presses as buttons; the
-    // Wayland backend of winit 0.30 has no tablet support and takes what the compositor emulates.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("CLAUDRALINGO_X11").is_some() {
+    if use_x11_for_pens() {
         // SAFETY: before any thread is started.
         unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
     }
@@ -31,6 +29,49 @@ fn main() {
         app.add_systems(Update, log_input);
     }
     app.run();
+}
+
+/// The pens through XWayland: the Wayland backend of winit 0.30 has no tablet support, KDE sends
+/// it nothing from a pen, XWayland sends the pen as a mouse. With a pen plugged in and an X
+/// server, the window opens on X11; `CLAUDRALINGO_X11=1` forces it, `CLAUDRALINGO_WAYLAND=1`
+/// keeps Wayland.
+#[cfg(target_os = "linux")]
+fn use_x11_for_pens() -> bool {
+    if std::env::var_os("CLAUDRALINGO_X11").is_some() {
+        return true;
+    }
+    if std::env::var_os("CLAUDRALINGO_WAYLAND").is_some()
+        || std::env::var_os("WAYLAND_DISPLAY").is_none()
+        || std::env::var_os("DISPLAY").is_none()
+    {
+        return false;
+    }
+    let devices = std::fs::read_to_string("/proc/bus/input/devices").unwrap_or_default();
+    let pen = has_pen(&devices);
+    if pen {
+        eprintln!("A pen is plugged in: the window opens through XWayland, CLAUDRALINGO_WAYLAND=1 keeps Wayland");
+    }
+    pen
+}
+
+/// A pen or a stylus among the input devices of `/proc/bus/input/devices`.
+#[cfg(target_os = "linux")]
+fn has_pen(devices: &str) -> bool {
+    devices
+        .lines()
+        .filter_map(|l| l.strip_prefix("N: Name="))
+        .map(str::to_lowercase)
+        .any(|name| name.contains("stylus") || name.contains(" pen") || name.contains("wacom"))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    #[test]
+    fn pens() {
+        let portia = "N: Name=\"ELAN9008:00 04F3:4359\"\nN: Name=\"ELAN9008:00 04F3:4359 Stylus\"\n";
+        assert!(super::has_pen(portia));
+        assert!(!super::has_pen("N: Name=\"Corne Keyboard\"\nN: Name=\"Corne Mouse\"\nN: Name=\"PC Speaker\"\n"));
+    }
 }
 
 /// `CLAUDRALINGO_INPUT_LOG=1`: the mouse, touch and picking events on stderr, to see what a pen

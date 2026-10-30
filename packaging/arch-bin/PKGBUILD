@@ -1,0 +1,27 @@
+# Maintainer: Seb Ospina <kraige at gmail dot com>
+# The binary package of the AUR: the Linux build of a GitHub release, nothing compiled. Update
+# pkgver and the sha256sums (updpkgsums) for each release `v<pkgver>`.
+pkgname=claudralingo-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Touch typing tutor for split keyboards (Corne, Lily58, ZMK keymaps) and HSK hanzi, made with Bevy"
+arch=('x86_64')
+url="https://github.com/sebosp/claudralingo"
+license=('GPL-3.0-or-later')
+depends=('alsa-lib' 'gcc-libs' 'glibc' 'libxkbcommon' 'systemd-libs' 'vulkan-icd-loader' 'wayland')
+provides=('claudralingo')
+conflicts=('claudralingo')
+options=('!strip' '!debug')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/claudralingo-linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd claudralingo-linux-x86_64
+  install -Dm755 claudralingo "$pkgdir/usr/bin/claudralingo"
+  install -Dm644 claudralingo.desktop "$pkgdir/usr/share/applications/claudralingo.desktop"
+  install -Dm644 favicon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/claudralingo.svg"
+  install -Dm644 apple-touch-icon.png "$pkgdir/usr/share/icons/hicolor/180x180/apps/claudralingo.png"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/claudralingo/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 hanzi-licenses/* -t "$pkgdir/usr/share/licenses/$pkgname/hanzi/"
+}

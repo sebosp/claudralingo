@@ -201,17 +201,21 @@ Enter is not a space: only Space moves to the next group of letters, Enter ends 
 
 ## Install on Arch Linux
 
-`packaging/arch/PKGBUILD` builds `claudralingo-git` from GitHub, for the AUR:
+`packaging/arch/PKGBUILD` builds `claudralingo-git` from the sources of GitHub,
+`packaging/arch-bin/PKGBUILD` packages `claudralingo-bin` from the Linux build of a release
+(nothing to compile, for the laptops). Both install a menu entry and its icon:
 
 ```sh
-cd packaging/arch && makepkg -si
+cd packaging/arch && makepkg -si        # or packaging/arch-bin
 ```
 
 ## Pens
 
-The Wayland backend of Bevy 0.20 (winit 0.30) has no tablet support: a pen works as the
-compositor emulates it. `CLAUDRALINGO_X11=1 claudralingo` runs through XWayland instead,
-`CLAUDRALINGO_INPUT_LOG=1` prints the mouse, touch and picking events to see what a pen sends.
+The Wayland backend of Bevy 0.20 (winit 0.30) has no tablet support, and KDE sends it nothing
+from a pen. With a pen or a stylus plugged in (`/proc/bus/input/devices`) and XWayland, the
+window opens on X11, where the pen is a mouse. `CLAUDRALINGO_WAYLAND=1` keeps Wayland,
+`CLAUDRALINGO_X11=1` forces X11, `CLAUDRALINGO_INPUT_LOG=1` prints the mouse, touch and picking
+events.
 
 ## Keyboards
 

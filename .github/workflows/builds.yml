@@ -32,9 +32,11 @@ jobs:
         run: cargo build --release
       - name: Package
         run: |
-          mkdir -p claudralingo-linux-x86_64
+          mkdir -p claudralingo-linux-x86_64/hanzi-licenses
           strip -o claudralingo-linux-x86_64/claudralingo target/release/claudralingo
-          cp README.md LICENSE claudralingo-linux-x86_64/
+          cp README.md LICENSE packaging/arch/claudralingo.desktop assets/web/favicon.svg \
+            assets/web/apple-touch-icon.png claudralingo-linux-x86_64/
+          cp assets/hanzi/LICENSES.md assets/hanzi/ARPHICPL.TXT assets/hanzi/OFL.txt claudralingo-linux-x86_64/hanzi-licenses/
           tar -czf claudralingo-linux-x86_64.tar.gz claudralingo-linux-x86_64
       - uses: actions/upload-artifact@v4
         with:
