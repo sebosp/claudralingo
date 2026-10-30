@@ -13,7 +13,7 @@ provides=('claudralingo')
 conflicts=('claudralingo')
 options=('!strip' '!debug')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/claudralingo-linux-x86_64.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('d193b4d0889dc8d6daf766bac0907303052a1d880ae5b68f1a366e1a1eb67f6f')
 
 package() {
   cd claudralingo-linux-x86_64
