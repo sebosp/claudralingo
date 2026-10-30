@@ -1,0 +1,25 @@
+pkgbase = claudralingo-git
+	pkgdesc = Touch typing tutor for split keyboards (Corne, Lily58, ZMK keymaps) and HSK hanzi, made with Bevy
+	pkgver = r22.5222730
+	pkgrel = 1
+	url = https://github.com/sebosp/claudralingo
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = cargo
+	makedepends = clang
+	makedepends = git
+	makedepends = mold
+	depends = alsa-lib
+	depends = gcc-libs
+	depends = glibc
+	depends = libxkbcommon
+	depends = systemd-libs
+	depends = vulkan-icd-loader
+	depends = wayland
+	provides = claudralingo
+	conflicts = claudralingo
+	options = !lto
+	source = claudralingo::git+https://github.com/sebosp/claudralingo.git
+	sha256sums = SKIP
+
+pkgname = claudralingo-git
