@@ -60,18 +60,31 @@ jobs:
           cargo install --locked cargo-apk
       # The runner has the Android SDK and an NDK.
       - name: Build the APK
+        env:
+          # The release key, from the secrets of the repository; never in the repository.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME"
-          # Signed with a debug key made here: installable, not for a store.
-          keytool -genkey -v -keystore "$RUNNER_TEMP/debug.keystore" -storepass android -alias androiddebugkey \
-            -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          export CARGO_APK_RELEASE_KEYSTORE="$RUNNER_TEMP/debug.keystore"
-          export CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo "Signed with the release key"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export CARGO_APK_RELEASE_KEYSTORE="$RUNNER_TEMP/release.jks"
+            export CARGO_APK_RELEASE_KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          else
+            # Without the secrets, a debug key made here: installable, not for a store.
+            echo "Signed with a debug key"
+            keytool -genkey -v -keystore "$RUNNER_TEMP/debug.keystore" -storepass android -alias androiddebugkey \
+              -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            export CARGO_APK_RELEASE_KEYSTORE="$RUNNER_TEMP/debug.keystore"
+            export CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
+          fi
           cd mobile
           cargo apk build --release --lib
           find target -name "*.apk"
           cp "$(find target -name '*.apk' | head -1)" ../claudralingo-android-arm64.apk
+          rm -f "$RUNNER_TEMP/release.jks"
       - uses: actions/upload-artifact@v4
         with:
           name: claudralingo-android-arm64
