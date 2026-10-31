@@ -7,6 +7,8 @@ use bevy::math::Vec2;
 use bevy::prelude::Resource;
 use serde::Deserialize;
 
+use super::strokes::{KINDS, Kind, kind_of};
+
 const WORDS: &str = include_str!("../../assets/hanzi/words.json");
 const STROKES: &str = include_str!("../../assets/hanzi/strokes.json");
 const AUDIO_INDEX: &str = include_str!("../../assets/hanzi/audio.json");
@@ -38,13 +40,18 @@ pub struct Word {
 struct RawGlyph {
     s: Vec<String>,
     m: Vec<Vec<[f32; 2]>>,
+    /// A letter per stroke, its kind.
+    #[serde(default)]
+    k: String,
 }
 
-/// The strokes of a character in their order: the outlines to draw, the medians to compare.
+/// The strokes of a character in their order: the outlines to draw, the medians to compare,
+/// their kinds.
 #[derive(Debug, Clone)]
 pub struct Glyph {
     pub outlines: Vec<Vec<PathOp>>,
     pub medians: Vec<Vec<Vec2>>,
+    pub kinds: Vec<&'static Kind>,
 }
 
 /// An absolute command of the SVG paths of Make Me a Hanzi.
@@ -86,7 +93,8 @@ impl HanziData {
                 let c = c.chars().next()?;
                 let outlines = g.s.iter().map(|p| parse_path(p)).collect();
                 let medians = g.m.iter().map(|m| m.iter().map(|p| Vec2::new(p[0], p[1])).collect()).collect();
-                Some((c, Glyph { outlines, medians }))
+                let kinds = g.k.chars().map(|k| kind_of(k).unwrap_or(&KINDS[0])).collect();
+                Some((c, Glyph { outlines, medians, kinds }))
             })
             .collect();
         let audio: HashMap<String, Vec<[usize; 2]>> = serde_json::from_str(AUDIO_INDEX).expect("assets/hanzi/audio.json");

@@ -1,9 +1,11 @@
 //! Draws a character of the hanzi mode into an image with tiny-skia: the practice grid (米字格),
-//! the outlines of the strokes as the stage shows them, the strokes drawn and the user's ink.
+//! the outlines of the strokes as the stage shows them, the strokes drawn and the user's ink, the
+//! brush guide of the next stroke, and the small images of the breakdown of a word.
 use bevy::color::{Color, ColorToComponents, Srgba};
 use bevy::math::Vec2;
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, StrokeDash, Transform};
+use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, StrokeDash, Transform};
 
+use super::brush::Guide;
 use super::data::{BASELINE, BOX, Glyph, PathOp};
 
 /// The side of the image in pixels.
@@ -29,6 +31,23 @@ pub struct Colors {
     pub ink: Color,
     pub user: Color,
     pub wrong: Color,
+    /// The path and the presses of the brush guide.
+    pub guide: Color,
+}
+
+/// What the canvas shows besides the character.
+#[derive(Default)]
+pub struct Frame<'a> {
+    pub looks: &'a [Look],
+    /// The stroke being drawn, in pixels, and its widths with the brush, empty without.
+    pub ink: &'a [Vec2],
+    pub ink_widths: &'a [f32],
+    /// The last rejected stroke, fading with its alpha.
+    pub wrong: Option<(&'a [Vec2], f32)>,
+    /// The last accepted brush stroke, fading over the character, to compare its thickness.
+    pub echo: Option<(&'a [Vec2], &'a [f32], f32)>,
+    /// The brush guide of the next stroke.
+    pub guide: Option<&'a Guide>,
 }
 
 fn paint(color: Color, alpha: f32) -> Paint<'static> {
@@ -90,12 +109,12 @@ fn polyline(points: &[Vec2]) -> Option<tiny_skia::Path> {
     pb.finish()
 }
 
-fn grid(pixmap: &mut Pixmap, colors: &Colors) {
+fn grid(pixmap: &mut Pixmap, colors: &Colors, ts: Transform) {
     let s = SIZE as f32;
     let mut stroke = Stroke { width: 2.0, ..Default::default() };
     let border = tiny_skia::Rect::from_xywh(2.0, 2.0, s - 4.0, s - 4.0).map(PathBuilder::from_rect);
     if let Some(border) = border {
-        pixmap.stroke_path(&border, &paint(colors.grid, 1.0), &stroke, Transform::identity(), None);
+        pixmap.stroke_path(&border, &paint(colors.grid, 1.0), &stroke, ts, None);
     }
     stroke.width = 1.5;
     stroke.dash = StrokeDash::new(vec![10.0, 8.0], 0.0);
@@ -106,24 +125,17 @@ fn grid(pixmap: &mut Pixmap, colors: &Colors) {
         ((s, 0.0), (0.0, s)),
     ] {
         if let Some(path) = polyline(&[Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)]) {
-            pixmap.stroke_path(&path, &paint(colors.grid, 0.8), &stroke, Transform::identity(), None);
+            pixmap.stroke_path(&path, &paint(colors.grid, 0.8), &stroke, ts, None);
         }
     }
 }
 
-/// The character with the looks of its strokes, the ink of the stroke being drawn and of the
-/// last rejected stroke, in pixels, the rejected one fading with `wrong_alpha`.
-pub fn draw(
-    pixmap: &mut Pixmap,
-    glyph: &Glyph,
-    looks: &[Look],
-    ink: &[Vec2],
-    wrong: Option<(&[Vec2], f32)>,
-    colors: &Colors,
-) {
+fn clear(pixmap: &mut Pixmap, colors: &Colors) {
     let [r, g, b, _] = Srgba::from(colors.paper).to_f32_array();
     pixmap.fill(tiny_skia::Color::from_rgba(r, g, b, 1.0).unwrap_or(tiny_skia::Color::WHITE));
-    grid(pixmap, colors);
+}
+
+fn strokes(pixmap: &mut Pixmap, glyph: &Glyph, looks: &[Look], colors: &Colors, ts: Transform) {
     for (ops, look) in glyph.outlines.iter().zip(looks) {
         let Some(path) = outline_path(ops) else {
             continue;
@@ -134,16 +146,139 @@ pub fn draw(
             Look::Next(alpha) => paint(colors.next, alpha),
             Look::Done => paint(colors.ink, 1.0),
         };
-        pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        pixmap.fill_path(&path, &paint, FillRule::Winding, ts, None);
+    }
+}
+
+/// The ink of a brush: discs at the points joined by quads, their widths varying, drawn opaque
+/// on a layer then laid with the alpha, the overlaps do not darken.
+fn brush_ink(pixmap: &mut Pixmap, points: &[Vec2], widths: &[f32], color: Color, alpha: f32) {
+    let (Some(first), Some(mut layer)) = (points.first(), Pixmap::new(pixmap.width(), pixmap.height())) else {
+        return;
+    };
+    let width = |i: usize| widths.get(i).copied().unwrap_or(super::brush::INK_MIN) / 2.0;
+    let mut pb = PathBuilder::new();
+    pb.push_circle(first.x, first.y, width(0));
+    for (i, w) in points.windows(2).enumerate() {
+        let (a, b) = (w[0], w[1]);
+        let n = (b - a).normalize_or_zero().perp();
+        pb.push_circle(b.x, b.y, width(i + 1));
+        if n != Vec2::ZERO {
+            let corners = [a + n * width(i), b + n * width(i + 1), b - n * width(i + 1), a - n * width(i)];
+            pb.move_to(corners[0].x, corners[0].y);
+            for c in &corners[1..] {
+                pb.line_to(c.x, c.y);
+            }
+            pb.close();
+        }
+    }
+    if let Some(path) = pb.finish() {
+        layer.fill_path(&path, &paint(color, 1.0), FillRule::Winding, Transform::identity(), None);
+        pixmap.draw_pixmap(0, 0, layer.as_ref(), &PixmapPaint { opacity: alpha, ..Default::default() }, Transform::identity(), None);
+    }
+}
+
+/// The guide of the brush, like the stroke charts of calligraphy: the path with an arrow, a ring
+/// as wide as the stroke where the brush presses, and the hook of the tip going in against the
+/// direction (藏锋).
+pub fn guide(pixmap: &mut Pixmap, guide: &Guide, colors: &Colors, ts: Transform) {
+    let points: Vec<Vec2> = guide.path.iter().map(|p| to_pixels(*p)).collect();
+    if points.len() < 2 {
+        return;
+    }
+    let scale = SIZE as f32 / BOX;
+    let line = Stroke { width: 3.0, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Default::default() };
+    let color = paint(colors.guide, 0.95);
+    if let Some(path) = polyline(&points) {
+        pixmap.stroke_path(&path, &color, &line, ts, None);
+    }
+    // The arrow at the end.
+    let end = points[points.len() - 1];
+    let dir = (end - points[points.len().saturating_sub(4)]).normalize_or_zero();
+    if dir != Vec2::ZERO {
+        let back = end - dir * 18.0;
+        let side = dir.perp() * 10.0;
+        if let Some(path) = polyline(&[back + side, end, back - side]) {
+            pixmap.stroke_path(&path, &color, &line, ts, None);
+        }
+    }
+    // The tip goes in against the direction, toward the upper left, then turns into the stroke.
+    let start = points[0];
+    let first = (points[points.len().min(4) - 1] - start).normalize_or_zero();
+    if guide.hidden_entry && first != Vec2::ZERO {
+        // The side of the stroke toward the top of the image, or its left for a vertical.
+        let mut side = first.perp();
+        if side.y > 0.1 || (side.y.abs() <= 0.1 && side.x > 0.0) {
+            side = -side;
+        }
+        let r = 22.0;
+        let from = start - first * r * 0.6 + side * r;
+        let control = start - first * r * 0.9 + side * r * 0.1;
+        let mut pb = PathBuilder::new();
+        pb.move_to(from.x, from.y);
+        pb.quad_to(control.x, control.y, start.x + first.x * 6.0, start.y + first.y * 6.0);
+        if let Some(path) = pb.finish() {
+            let thin = Stroke { width: 2.0, dash: StrokeDash::new(vec![4.0, 3.0], 0.0), ..line.clone() };
+            pixmap.stroke_path(&path, &color, &thin, ts, None);
+        }
+    }
+    // The presses.
+    let ring = Stroke { width: 2.5, ..Default::default() };
+    for (center, width) in &guide.presses {
+        let c = to_pixels(*center);
+        if let Some(path) = PathBuilder::from_circle(c.x, c.y, (width * scale / 2.0).max(6.0)) {
+            pixmap.stroke_path(&path, &color, &ring, ts, None);
+        }
+    }
+    // A dot where it starts.
+    if let Some(path) = PathBuilder::from_circle(start.x, start.y, 5.0) {
+        pixmap.fill_path(&path, &color, FillRule::Winding, ts, None);
+    }
+}
+
+/// The character with the looks of its strokes, the ink of the stroke being drawn, of the last
+/// rejected stroke and of the last brush stroke, and the brush guide.
+pub fn draw(pixmap: &mut Pixmap, glyph: &Glyph, frame: &Frame, colors: &Colors) {
+    let ts = Transform::identity();
+    clear(pixmap, colors);
+    grid(pixmap, colors, ts);
+    strokes(pixmap, glyph, frame.looks, colors, ts);
+    if let Some((points, widths, alpha)) = frame.echo {
+        brush_ink(pixmap, points, widths, colors.user, 0.7 * alpha);
+    }
+    if let Some(g) = frame.guide {
+        guide(pixmap, g, colors, ts);
     }
     let pen = Stroke { width: 22.0, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Default::default() };
-    if let Some((points, alpha)) = wrong
+    if let Some((points, alpha)) = frame.wrong
         && let Some(path) = polyline(points)
     {
-        pixmap.stroke_path(&path, &paint(colors.wrong, alpha), &pen, Transform::identity(), None);
+        pixmap.stroke_path(&path, &paint(colors.wrong, alpha), &pen, ts, None);
     }
-    if let Some(path) = polyline(ink) {
-        pixmap.stroke_path(&path, &paint(colors.user, 0.85), &pen, Transform::identity(), None);
+    if !frame.ink_widths.is_empty() {
+        brush_ink(pixmap, frame.ink, frame.ink_widths, colors.user, 0.85);
+    } else if let Some(path) = polyline(frame.ink) {
+        pixmap.stroke_path(&path, &paint(colors.user, 0.85), &pen, ts, None);
+    }
+}
+
+/// A stroke of the character in a small image: the strokes before it in ink, it in the color of
+/// the next stroke, the ones after faint, and its brush guide when given.
+pub fn draw_stroke(pixmap: &mut Pixmap, glyph: &Glyph, stroke: usize, guide_of: Option<&Guide>, colors: &Colors) {
+    let s = pixmap.width() as f32 / SIZE as f32;
+    let ts = Transform::from_scale(s, s);
+    clear(pixmap, colors);
+    grid(pixmap, colors, ts);
+    let looks: Vec<Look> = (0..glyph.outlines.len())
+        .map(|i| match i.cmp(&stroke) {
+            std::cmp::Ordering::Less => Look::Done,
+            std::cmp::Ordering::Equal => Look::Next(if guide_of.is_some() { 0.45 } else { 1.0 }),
+            std::cmp::Ordering::Greater => Look::Outline(0.18),
+        })
+        .collect();
+    strokes(pixmap, glyph, &looks, colors, ts);
+    if let Some(g) = guide_of {
+        guide(pixmap, g, colors, ts);
     }
 }
 
@@ -171,10 +306,19 @@ mod tests {
             ink: Color::BLACK,
             user: Color::srgb(0.0, 0.0, 1.0),
             wrong: Color::srgb(1.0, 0.0, 0.0),
+            guide: Color::srgb(1.0, 0.0, 0.0),
         };
         let mut pixmap = Pixmap::new(SIZE, SIZE).expect("pixmap");
-        draw(&mut pixmap, glyph, &[Look::Done, Look::Outline(0.3)], &[], None, &colors);
+        let frame = Frame { looks: &[Look::Done, Look::Outline(0.3)], ..Default::default() };
+        draw(&mut pixmap, glyph, &frame, &colors);
         let dark = pixmap.pixels().iter().filter(|p| p.red() < 50).count();
         assert!(dark > 1000, "{dark}");
+        // A small image of the second stroke, with its guide in red.
+        let mut tile = Pixmap::new(SIZE, SIZE).expect("tile");
+        let profile = super::super::brush::profile(&glyph.outlines[1], &glyph.medians[1]);
+        let g = super::super::brush::guide(&profile, glyph.kinds[1]);
+        draw_stroke(&mut tile, glyph, 1, Some(&g), &colors);
+        let red = tile.pixels().iter().filter(|p| p.red() > 200 && p.green() < 80 && p.blue() < 80).count();
+        assert!(red > 50, "{red}");
     }
 }

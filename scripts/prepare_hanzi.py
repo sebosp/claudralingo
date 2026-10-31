@@ -7,6 +7,9 @@
   Make Me a Hanzi (skishore/makemeahanzi, graphics.txt, Arphic Public License).
 - audio.bin and audio.json: the recordings of the words, else of their syllables, from
   hugolpz/audio-cmn (CC-BY-SA), 24 kbit/s mp3, packed one after the other.
+- the kinds of the strokes in strokes.json ("k", a letter per stroke, see
+  src/hanzi/strokes.rs), from cnchar-order (MIT), the names it leaves ambiguous resolved by the
+  shapes of the medians: `--kinds`, on the strokes.json there is.
 
 Run it from the repository root: python3 scripts/prepare_hanzi.py
 """
@@ -136,18 +139,22 @@ def main():
         f.write(blob)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and len(sys.argv) == 1:
     main()
 
 
 def subset_font():
-    """The hanzi of the words in Noto Sans CJK SC (SIL Open Font License), only those: the
-    whole font is 16 MB. Needs fonttools and the font, NOTO_CJK or the path of Arch Linux."""
+    """The hanzi of the words in Noto Sans CJK SC (SIL Open Font License), only those and the
+    ones of the texts of src/hanzi (the names of the strokes): the whole font is 16 MB. Needs
+    fonttools and the font, NOTO_CJK or the path of Arch Linux."""
+    import glob
     import subprocess
 
     ttc = os.environ.get("NOTO_CJK", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc")
     words = json.load(open(f"{OUT}/words.json"))
     text = "".join(w["w"] for w in words) + "，。？！、：；“”（）·"
+    for path in sorted(glob.glob("src/hanzi/*.rs")):
+        text += "".join(sorted({c for c in open(path).read() if "\u3400" <= c <= "\u9fff"}))
     with open(f"{CACHE}/subset.txt", "w") as f:
         f.write(text)
     subprocess.run([
@@ -159,3 +166,87 @@ def subset_font():
 
 if __name__ == "__main__" and "--font" in sys.argv:
     subset_font()
+
+
+CNCHAR = "https://registry.npmjs.org/cnchar-order/-/cnchar-order-3.2.6.tgz"
+# The 横斜钩 of 风, 飞 and 气, the other 横折弯钩 of cnchar's "o".
+HENG_XIE_GOU = set("风飞气汽疯讽枫")
+
+
+def angles(median):
+    """The directions of the segments of a median, in degrees, y upwards."""
+    import math
+    return [math.degrees(math.atan2(y1 - y0, x1 - x0)) for (x0, y0), (x1, y1) in zip(median, median[1:])]
+
+
+def lengths(median):
+    import math
+    return [math.hypot(x1 - x0, y1 - y0) for (x0, y0), (x1, y1) in zip(median, median[1:])]
+
+
+def resolve(code, char, i, codes, median):
+    """One letter for the names cnchar gives two, by the shape of the median. Checked by eye on
+    every stroke of HSK 1 to 4."""
+    xs = [p[0] for p in median]
+    ys = [p[1] for p in median]
+    wide = (max(xs) - min(xs)) / max(1, max(ys) - min(ys))
+    # Without the first segment: the median enters the stroke from its tip, at an angle.
+    turns = [abs(b - a) for a, b in zip(angles(median)[1:], angles(median)[2:])]
+    if code == "e":
+        # 横撇 or 横钩: the 横钩 of 欠, else a short tail after the horizontal.
+        if codes[i - 1:i] == "s" and codes[i + 1:i + 3] == "sl":
+            return "E"
+        across = tail = 0.0
+        turned = False
+        for a, l in zip(angles(median), lengths(median)):
+            if not turned and -35 <= a <= 45:
+                across += l
+            elif a < -60 or turned:
+                turned = True
+                tail += l
+        ratio = tail / max(across, 1)
+        # The 横撇 of マ, 甬 and 令 are short, a dot follows them.
+        if codes[i + 1:i + 2] == "k" and ratio >= 0.35:
+            return "e"
+        return "E" if ratio < 0.48 else "e"
+    if code == "y":
+        # 斜钩 steep, 卧钩 (心) lying.
+        return "y" if wide < 1.2 else "Y"
+    if code == "w":
+        # 横撇弯钩 (阝) narrow, 横折折折钩 (乃) wide.
+        return "W" if wide < 0.56 else "w"
+    if code == "v":
+        # 横折弯 (几 of 殳 and 舟) bends, 横折折 turns.
+        return "V" if sum(1 for a in angles(median)[1:] if -80 < a < -20) >= 2 else "v"
+    if code == "x":
+        return "x" if min(angles(median)[-3:]) < -100 else "X"
+    if code == "o":
+        return "o" if char in HENG_XIE_GOU else "O"
+    if code == "b":
+        # 竖折 (山) turns sharply, 竖弯 (四) bends.
+        return "B" if turns and max(turns) >= 55 else "b"
+    return code
+
+
+def stroke_kinds():
+    """The kinds of the strokes into strokes.json: cnchar's letters, one letter per name."""
+    import io
+    import tarfile
+
+    tgz = fetch(CNCHAR, "cnchar-order.tgz")
+    with tarfile.open(fileobj=io.BytesIO(tgz)) as tar:
+        js = tar.extractfile("package/cnchar.order.min.js").read().decode()
+    orders = json.loads(re.findall(r"JSON\.parse\('(\{.*?\})'\)", js)[0])
+    path = f"{OUT}/strokes.json"
+    strokes = json.load(open(path))
+    for char, glyph in strokes.items():
+        codes = orders.get(char)
+        if codes is None or len(codes) != len(glyph["m"]):
+            sys.exit(f"cnchar-order: no strokes or not {len(glyph['m'])} for {char}")
+        glyph["k"] = "".join(resolve(c, char, i, codes, m) for i, (c, m) in enumerate(zip(codes, glyph["m"])))
+    with open(path, "w") as f:
+        json.dump(strokes, f, ensure_ascii=False, separators=(",", ":"))
+
+
+if __name__ == "__main__" and "--kinds" in sys.argv:
+    stroke_kinds()

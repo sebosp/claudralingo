@@ -4,11 +4,16 @@
 //! empty grid. The strokes are compared with the strokes of Make Me a Hanzi as Hanzi Writer
 //! does, see [`matcher`]. Then the pinyin of the word is typed, with the letters of the keyboard
 //! or the nine keys of a phone (T9), and the word picked among the candidates, see [`pinyin`].
-//! The words are spoken, the recordings of audio-cmn are embedded.
+//! The words are spoken, the recordings of audio-cmn are embedded. With the brush setting the
+//! next stroke shows where the brush presses and lifts and the ink is thick or thin, see
+//! [`brush`]; the Strokes button breaks the word down into its strokes, see [`breakdown`].
+pub mod breakdown;
+pub mod brush;
 pub mod data;
 pub mod matcher;
 pub mod pinyin;
 pub mod render;
+pub mod strokes;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -21,6 +26,7 @@ use bevy::feathers::theme::{ThemeBackgroundColor, ThemeTextColor, UiTheme};
 use bevy::feathers::tokens as feathers_tokens;
 use bevy::input_focus::InputFocus;
 use bevy::picking::events::{PointerClick, PointerDrag, PointerDragEnd, PointerPress, PointerRelease};
+use bevy::input::touch::{ForceTouch, Touches};
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -34,12 +40,14 @@ use crate::theme::tokens;
 use data::HanziData;
 use matcher::{Options, Outcome};
 use pinyin::{Candidate, Ime};
-use render::{Colors, Look, SIZE};
+use render::{Look, SIZE};
 
 /// The misses on a stroke before its hint shows.
 const MISSES_BEFORE_HINT: u32 = 3;
 const HINT_SECONDS: f32 = 1.6;
 const WRONG_SECONDS: f32 = 0.6;
+/// The last brush stroke stays over the character, to compare its thickness.
+const ECHO_SECONDS: f32 = 1.4;
 /// The misses of a step that repeat it.
 const MISSES_TO_REPEAT: u32 = 3;
 /// The size of the drawing area, in logical pixels.
@@ -100,6 +108,12 @@ pub struct Practice {
     word_strokes: u32,
     /// The stroke being drawn, in the pixels of the image.
     ink: Vec<Vec2>,
+    /// Its widths with the brush, empty without.
+    ink_widths: Vec<f32>,
+    /// When its last point was drawn, in seconds.
+    last_point: f64,
+    /// The last stroke accepted with the brush and its widths, fading.
+    echo: Option<(Vec<Vec2>, Vec<f32>, f32)>,
     drawing: bool,
     /// The last stroke not accepted, fading.
     wrong: Option<(Vec<Vec2>, f32)>,
@@ -164,6 +178,9 @@ struct CandidatesRow;
 struct Keypad;
 #[derive(Component, Default, Clone)]
 struct NextLevelButton;
+/// The kind of the next stroke and, with the brush, how to write it.
+#[derive(Component, Default, Clone)]
+struct KindText;
 /// A key of the nine keys: a digit, `<` for Backspace, ` ` to pick the first candidate, `x` to
 /// clear.
 #[derive(Component, Default, Clone)]
@@ -173,14 +190,15 @@ pub struct HanziPlugin;
 
 impl Plugin for HanziPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(HanziData::load())
+        app.add_plugins(breakdown::BreakdownPlugin)
+            .insert_resource(HanziData::load())
             .init_resource::<Practice>()
             .init_resource::<Speaker>()
             .insert_resource(InputMethod(None))
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (start_word, keys, auto_strokes, fade, draw_canvas, update_view, update_candidates, speak, set_fonts)
+                (start_word, keys, auto_strokes, fade, draw_canvas, update_view, update_kind_text, update_candidates, speak, set_fonts)
                     .chain()
                     .after(crate::game::GameSystems)
                     .run_if(|progress: Res<Progress>| progress.mode == ExerciseMode::Hanzi),
@@ -275,7 +293,9 @@ pub fn view() -> impl Scene {
                 Children [
                     Node {
                         flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
                         column_gap: px(8),
+                        row_gap: px(8),
                     }
                     Children [
                         @FeathersButton {
@@ -289,6 +309,11 @@ pub fn view() -> impl Scene {
                         on(restart_word)
                         --
                         @FeathersButton {
+                            @caption: bsn! { @caption("Strokes") }
+                        }
+                        on(breakdown::open)
+                        --
+                        @FeathersButton {
                             @caption: bsn! { @caption("Next level") }
                             @variant: ButtonVariant::Primary,
                         }
@@ -296,6 +321,9 @@ pub fn view() -> impl Scene {
                         Node { display: Display::None }
                         on(next_level)
                     ]
+                    --
+                    Text("") KindText
+                    ThemeTextColor(feathers_tokens::TEXT_MAIN)
                     --
                     Node {
                         display: Display::None,
@@ -548,10 +576,22 @@ fn canvas_point(
     Some((physical - top_left) / size * SIZE as f32)
 }
 
+/// The pressure of a pen or a finger, 0 to 1, when the device tells it.
+fn pressure(touches: &Touches) -> Option<f32> {
+    touches.iter().find_map(|t| t.force()).map(|force| match force {
+        ForceTouch::Normalized(f) => f as f32,
+        ForceTouch::Calibrated { force, max_possible_force, .. } => (force / max_possible_force.max(1e-6)) as f32,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn pen_down(
     press: On<PointerPress>,
     window: Single<&Window>,
     canvas: Query<(&ComputedNode, &UiGlobalTransform), With<CanvasNode>>,
+    progress: Res<Progress>,
+    touches: Res<Touches>,
+    time: Res<Time<Real>>,
     mut practice: ResMut<Practice>,
 ) {
     if press.button != PointerButton::Primary || practice.stage == Stage::Pinyin || practice.level_done {
@@ -559,6 +599,13 @@ fn pen_down(
     }
     if let Some(p) = canvas_point(press.pointer.position, &window, &canvas) {
         practice.ink = vec![p];
+        practice.ink_widths.clear();
+        if progress.brush {
+            // The tip rests as it touches down: the widest ink, or the pressure.
+            let width = pressure(&touches).map_or(brush::width_of_speed(0.0, None), brush::width_of_pressure);
+            practice.ink_widths.push(width);
+        }
+        practice.last_point = time.elapsed_secs_f64();
         practice.drawing = true;
         practice.dirty = true;
     }
@@ -568,14 +615,27 @@ fn pen_move(
     drag: On<PointerDrag>,
     window: Single<&Window>,
     canvas: Query<(&ComputedNode, &UiGlobalTransform), With<CanvasNode>>,
+    touches: Res<Touches>,
+    time: Res<Time<Real>>,
     mut practice: ResMut<Practice>,
 ) {
     if !practice.drawing {
         return;
     }
     if let Some(p) = canvas_point(drag.pointer.position, &window, &canvas)
-        && practice.ink.last().is_none_or(|last| last.distance(p) >= 2.0)
+        && let Some(last) = practice.ink.last().copied()
+        && last.distance(p) >= 2.0
     {
+        if !practice.ink_widths.is_empty() {
+            let now = time.elapsed_secs_f64();
+            let dt = (now - practice.last_point).max(1.0 / 240.0) as f32;
+            practice.last_point = now;
+            let width = match pressure(&touches) {
+                Some(pressure) => brush::width_of_pressure(pressure),
+                None => brush::width_of_speed(last.distance(p) / dt, practice.ink_widths.last().copied()),
+            };
+            practice.ink_widths.push(width);
+        }
         practice.ink.push(p);
         practice.dirty = true;
     }
@@ -597,6 +657,7 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
     practice.drawing = false;
     practice.dirty = true;
     let ink = std::mem::take(&mut practice.ink);
+    let widths = std::mem::take(&mut practice.ink_widths);
     if ink.len() < 2 {
         return;
     }
@@ -618,6 +679,14 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
             practice.stroke += 1;
             practice.skip_given(data);
             practice.message.clear();
+            // With the brush: its thickness against the stroke's, the ink stays a moment.
+            if !widths.is_empty() {
+                let target = brush::profile(&glyph.outlines[stroke], &glyph.medians[stroke]);
+                if let Some(advice) = brush::advice(&target, &brush::along(&ink, &widths, 24)) {
+                    practice.message = format!("{} {advice}", glyph.kinds.get(stroke).map_or("", |k| k.hanzi));
+                }
+                practice.echo = Some((ink, widths, ECHO_SECONDS));
+            }
             if practice.stroke >= n {
                 next_char(practice, data, speaker);
             }
@@ -847,6 +916,13 @@ fn auto_strokes(
         };
         let stroke = practice.stroke.min(glyph.medians.len() - 1);
         practice.ink = glyph.medians[stroke].iter().map(|p| render::to_pixels(*p)).collect();
+        // With the brush, as thick as the stroke: its profile.
+        if progress.brush {
+            let profile = brush::profile(&glyph.outlines[stroke], &glyph.medians[stroke]);
+            let scale = SIZE as f32 / data::BOX;
+            practice.ink = profile.points.iter().map(|p| render::to_pixels(*p)).collect();
+            practice.ink_widths = profile.widths.iter().map(|w| (w * scale).max(brush::INK_MIN)).collect();
+        }
         practice.drawing = true;
         finish_stroke(&mut practice, &data, &mut speaker);
         *done += 1;
@@ -875,15 +951,36 @@ fn fade(time: Res<Time>, mut practice: ResMut<Practice>) {
             practice.wrong = None;
         }
     }
+    if let Some((_, _, left)) = practice.echo.as_mut() {
+        *left -= dt;
+        let gone = *left <= 0.0;
+        practice.dirty = true;
+        if gone {
+            practice.echo = None;
+        }
+    }
 }
 
+/// The brush guide of the next stroke, for the word, the character and the stroke.
+type GuideCache = Option<((usize, usize, usize), brush::Guide)>;
+
+/// The brush guide is shown: the outline is there to follow, or the hint.
+fn shows_guide(practice: &Practice, progress: &Progress) -> bool {
+    progress.brush
+        && !practice.level_done
+        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.hint > 0.0 && practice.stage != Stage::Pinyin)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_canvas(
     mut practice: ResMut<Practice>,
     mut canvas: ResMut<Canvas>,
     data: Res<HanziData>,
+    progress: Res<Progress>,
     theme: Res<UiTheme>,
     mut images: ResMut<Assets<Image>>,
     mut nodes: Query<&mut ImageNode, With<CanvasNode>>,
+    mut guide_of: Local<GuideCache>,
 ) {
     for mut node in &mut nodes {
         if node.image != canvas.image {
@@ -891,19 +988,11 @@ fn draw_canvas(
             practice.dirty = true;
         }
     }
-    if !practice.dirty && !theme.is_changed() {
+    if !practice.dirty && !theme.is_changed() && !progress.is_changed() {
         return;
     }
     practice.dirty = false;
-    let colors = Colors {
-        paper: theme.color(&tokens::KEY_BG),
-        grid: theme.color(&tokens::KEY_BORDER),
-        outline: theme.color(&feathers_tokens::TEXT_DIM),
-        next: theme.color(&tokens::CURSOR),
-        ink: theme.color(&feathers_tokens::TEXT_MAIN),
-        user: theme.color(&tokens::SPARK_OK),
-        wrong: theme.color(&tokens::CHAR_WRONG),
-    };
+    let colors = breakdown::colors(&theme);
     let glyph = practice.current_char(&data).and_then(|c| data.glyph(c));
     let Canvas { image, pixmap } = &mut *canvas;
     match glyph {
@@ -916,11 +1005,30 @@ fn draw_canvas(
                 practice.looks(n)
             };
             let wrong = practice.wrong.as_ref().map(|(p, t)| (p.as_slice(), (t / WRONG_SECONDS).clamp(0.0, 1.0)));
-            render::draw(pixmap, glyph, &looks, &practice.ink, wrong, &colors);
+            let echo = practice.echo.as_ref().map(|(p, w, t)| (p.as_slice(), w.as_slice(), (t / ECHO_SECONDS).clamp(0.0, 1.0)));
+            let key = (practice.word, practice.char_index, practice.stroke);
+            let guide = if shows_guide(&practice, &progress) && practice.stroke < n {
+                if guide_of.as_ref().is_none_or(|(k, _)| *k != key) {
+                    let profile = brush::profile(&glyph.outlines[key.2], &glyph.medians[key.2]);
+                    *guide_of = Some((key, brush::guide(&profile, glyph.kinds[key.2])));
+                }
+                guide_of.as_ref().map(|(_, g)| g)
+            } else {
+                None
+            };
+            let frame = render::Frame {
+                looks: &looks,
+                ink: &practice.ink,
+                ink_widths: &practice.ink_widths,
+                wrong,
+                echo,
+                guide,
+            };
+            render::draw(pixmap, glyph, &frame, &colors);
         }
         None => {
-            let empty = data::Glyph { outlines: Vec::new(), medians: Vec::new() };
-            render::draw(pixmap, &empty, &[], &[], None, &colors);
+            let empty = data::Glyph { outlines: Vec::new(), medians: Vec::new(), kinds: Vec::new() };
+            render::draw(pixmap, &empty, &render::Frame::default(), &colors);
         }
     }
     if let Some(mut image) = images.get_mut(image) {
@@ -1019,6 +1127,46 @@ fn update_view(
     for mut node in &mut panels.p2() {
         node.display = show(practice.level_done);
     }
+}
+
+/// The kind of the next stroke while the outline is there to follow, and with the brush how to
+/// write it, its hanzi in the CJK font.
+#[allow(clippy::too_many_arguments)]
+fn update_kind_text(
+    practice: Res<Practice>,
+    progress: Res<Progress>,
+    data: Res<HanziData>,
+    font: Res<HanziFont>,
+    asset_server: Res<AssetServer>,
+    texts: Query<Entity, With<KindText>>,
+    mut shown: Local<Option<String>>,
+    mut commands: Commands,
+) {
+    if !practice.is_changed() && !progress.is_changed() {
+        return;
+    }
+    let glyph = practice.current_char(&data).and_then(|c| data.glyph(c));
+    let visible = !practice.level_done
+        && practice.stage != Stage::Pinyin
+        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.hint > 0.0);
+    let text = match glyph.and_then(|g| g.kinds.get(practice.stroke).map(|k| (k, g.kinds.len()))) {
+        Some((kind, n)) if visible => {
+            let mut text = format!("Stroke {} of {n}: {} {}, {}", practice.stroke + 1, kind.hanzi, kind.pinyin, kind.english);
+            if progress.brush {
+                text.push_str(&format!(".\n{}", kind.brush));
+            }
+            text
+        }
+        _ => String::new(),
+    };
+    if shown.as_ref() == Some(&text) {
+        return;
+    }
+    let fonts = breakdown::Fonts { latin: asset_server.load(bevy::feathers::constants::fonts::REGULAR), cjk: font.0.clone() };
+    for entity in &texts {
+        fonts.fill(&mut commands, entity, &text, 15.0, feathers_tokens::TEXT_MAIN);
+    }
+    *shown = Some(text);
 }
 
 /// The candidate buttons, in the CJK font, a click picks one.

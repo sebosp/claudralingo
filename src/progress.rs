@@ -260,6 +260,9 @@ pub struct Progress {
     pub pinyin_keypad: bool,
     /// The words of the hanzi mode are spoken.
     pub sound: bool,
+    /// The hanzi are written with a brush: the next stroke shows where it presses and lifts,
+    /// the ink is thick or thin with the pressure of a pen, else with the speed.
+    pub brush: bool,
     pub hanzi: HanziProgress,
     /// The `.keymap` file of ZMK imported, the layout "My ZMK keymap".
     pub custom_keymap: Option<String>,
@@ -317,6 +320,7 @@ impl Default for Progress {
             zoom_factor: 1.0,
             pinyin_keypad: false,
             sound: true,
+            brush: true,
             hanzi: HanziProgress::default(),
             custom_keymap: None,
             lock_lessons: true,
