@@ -1,6 +1,6 @@
 pkgbase = claudralingo-bin
 	pkgdesc = Touch typing tutor for split keyboards (Corne, Lily58, ZMK keymaps) and HSK hanzi, made with Bevy
-	pkgver = 0.1.0
+	pkgver = 0.2.0
 	pkgrel = 1
 	url = https://github.com/sebosp/claudralingo
 	arch = x86_64
@@ -16,7 +16,7 @@ pkgbase = claudralingo-bin
 	conflicts = claudralingo
 	options = !strip
 	options = !debug
-	source = claudralingo-bin-0.1.0.tar.gz::https://github.com/sebosp/claudralingo/releases/download/v0.1.0/claudralingo-linux-x86_64.tar.gz
-	sha256sums = d193b4d0889dc8d6daf766bac0907303052a1d880ae5b68f1a366e1a1eb67f6f
+	source = claudralingo-bin-0.2.0.tar.gz::https://github.com/sebosp/claudralingo/releases/download/v0.2.0/claudralingo-linux-x86_64.tar.gz
+	sha256sums = 0e5af5a50de225b5daa186a5932b57d82627e3ea1f596a129166ac8d1b8b1aaf
 
 pkgname = claudralingo-bin
