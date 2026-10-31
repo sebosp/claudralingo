@@ -256,6 +256,24 @@ candidates are the HSK words, then the words of the `inputx-pinyin` dictionary, 
 characters of the embedded font. The data is made by `scripts/prepare_hanzi.py`, see
 `assets/hanzi/LICENSES.md`.
 
+While the outline is there to follow, the name of the next stroke shows beside the drawing
+(竖钩 shùgōu, vertical hook): the 33 kinds of strokes of cnchar, the names it gives two told
+apart by the shapes of the strokes.
+
+**Brush** (settings, on by default): the strokes of the embedded font are those of a brush,
+thick where it presses and thin where it lifts, and the next stroke shows it like the stroke
+charts of calligraphy: its path with an arrow, a ring as wide as the stroke where the brush
+presses, a dashed hook where the tip goes in against the direction first (藏锋), and how to write
+it in words. The ink is thick or thin too: with the pressure of a pen when the device reports it,
+else with the speed, slow is thick, as a brush that rests. An accepted stroke stays a moment over
+the character, and its thickness is compared with the stroke's at the start, the middle and the
+end: "Lift toward the end", "Press at the start".
+
+**Strokes** (the button beside Hint): the word broken down, every character stroke by stroke with
+the names of the strokes. A click on a stroke shows it with its brush guide, how the brush writes
+it, the basic strokes it is made of (横 竖 撇 捺 点 提 钩 折 弯, a click describes one) and the
+characters of the HSK words that have it too, a click breaks one down in turn.
+
 ## Progress
 
 Native builds save the progress to `~/.config/claudralingo/progress.json` (`$XDG_CONFIG_HOME` if
@@ -294,7 +312,8 @@ round trip, `^` clicks the on-screen key the hints point at) and saves a screens
 screen without a keyboard. `CLAUDRALINGO_PREVIEW_LAYER=2` shows a layer, `CLAUDRALINGO_HELP=1`
 keeps the help of the first start open, `CLAUDRALINGO_LESSONS=1` and `CLAUDRALINGO_STATS=1` open
 those panels, `CLAUDRALINGO_HANZI_STROKES=n` draws n strokes of the hanzi on their medians and
-`CLAUDRALINGO_HANZI_INPUT=33` types the pinyin step. The keys of the real keyboard are ignored
+`CLAUDRALINGO_HANZI_INPUT=33` types the pinyin step, `CLAUDRALINGO_STROKES=n` opens the strokes of
+the word on its stroke n (`CLAUDRALINGO_STROKES_BASIC=n` describes the basic stroke n). The keys of the real keyboard are ignored
 during these runs.
 
 The help (`?` in the toolbar or F1) sums up the modes, the buttons and the keys, it opens by
@@ -308,6 +327,7 @@ itself on the first start.
 - The look and the animations of the keyboard are inspired by
   [Layer Tutor](https://layer-tutor.pages.dev/), no code was copied.
 - The widgets, the Fira fonts and the dark theme come from bevy_feathers.
-- The hanzi data: HSK words (MIT), Make Me a Hanzi strokes (Arphic Public License), audio-cmn
-  recordings (CC BY-SA), Noto Sans CJK SC (OFL), the stroke matching of Hanzi Writer (MIT), see
+- The hanzi data: HSK words (MIT), Make Me a Hanzi strokes (Arphic Public License), the kinds of
+  the strokes of cnchar-order (MIT), audio-cmn recordings (CC BY-SA), Noto Sans CJK SC (OFL), the
+  stroke matching of Hanzi Writer (MIT), see
   `assets/hanzi/LICENSES.md`; the pinyin dictionary of `inputx-pinyin` (MIT or Apache-2.0).

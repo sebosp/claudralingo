@@ -85,6 +85,7 @@ enum Setting {
     FitWindow,
     PinyinKeypad,
     Sound,
+    Brush,
     LockLessons,
     Compact,
     FixWithBackspace,
@@ -154,6 +155,8 @@ pub enum Panel {
     Settings,
     Lessons,
     Stats,
+    /// The strokes of the hanzi word, see [`crate::hanzi::breakdown`].
+    Strokes,
     /// At the start: continue where the last session stopped, or warm up first.
     Welcome,
 }
@@ -171,6 +174,8 @@ MODES, the first menu
   Finger drill, Left and Right hand finger bounce: one finger, or middle and index in turns
   Shortcuts & keys: Esc, arrows, Ctrl and Alt shortcuts, Alt+Tab
   Hanzi (HSK 1-4): write each word with a pen, mouse or finger, then type its pinyin
+    Strokes: the word stroke by stroke, how the brush writes each, its basic strokes
+    Brush (settings): rings where the brush presses, thin ends lift; slow is thick without pressure
 
 TOOLBAR
   ‹ ›  the lesson, the finger, the hand or the hanzi level    Restart  a new text
@@ -395,6 +400,8 @@ fn root(
             @welcome_overlay()
             --
             @crate::stats::overlay()
+            --
+            @crate::hanzi::breakdown::overlay()
         ]
     }
 }
@@ -602,6 +609,8 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     @setting_checkbox(Setting::PinyinKeypad, "Hanzi: type the pinyin on the nine keys of a phone (T9)")
                     --
                     @setting_checkbox(Setting::Sound, "Hanzi: speak the words")
+                    --
+                    @setting_checkbox(Setting::Brush, "Hanzi: brush, where to press and lift; a pen's pressure or the speed (slow is thick)")
                     --
                     Node {
                         flex_direction: FlexDirection::Row,
@@ -994,6 +1003,7 @@ impl Setting {
             Setting::FitWindow => progress.fit_window,
             Setting::PinyinKeypad => progress.pinyin_keypad,
             Setting::Sound => progress.sound,
+            Setting::Brush => progress.brush,
             Setting::LockLessons => progress.lock_lessons,
             Setting::Compact => progress.compact,
             Setting::FixWithBackspace => progress.fix_with_backspace,
@@ -1040,6 +1050,7 @@ fn on_setting_change(
         Setting::FitWindow => progress.fit_window = change.value,
         Setting::PinyinKeypad => progress.pinyin_keypad = change.value,
         Setting::Sound => progress.sound = change.value,
+        Setting::Brush => progress.brush = change.value,
         Setting::LockLessons => progress.lock_lessons = change.value,
         Setting::Compact => progress.compact = change.value,
         Setting::FixWithBackspace => progress.fix_with_backspace = change.value,
