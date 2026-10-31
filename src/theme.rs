@@ -69,6 +69,8 @@ pub mod tokens {
     pub const SPARK_ERROR: ThemeToken = ThemeToken::new_static("claudralingo.spark.error");
     pub const PROGRESS_TRACK: ThemeToken = ThemeToken::new_static("claudralingo.progress.track");
     pub const PROGRESS_BAR: ThemeToken = ThemeToken::new_static("claudralingo.progress.bar");
+    /// The headings of the help, at least 4.5:1 on the panels.
+    pub const HEADING: ThemeToken = ThemeToken::new_static("claudralingo.heading");
     /// One color per finger, Klavaro's finger numbers, 0 is unused.
     pub const FINGERS: [ThemeToken; 10] = [
         ThemeToken::new_static("claudralingo.finger.0"),
@@ -274,6 +276,7 @@ fn terminal_theme(t: &Terminal) -> ThemeProps {
     set(&mut props, &tokens::SPARK_ERROR, red);
     set(&mut props, &tokens::PROGRESS_TRACK, item);
     set(&mut props, &tokens::PROGRESS_BAR, accent);
+    set(&mut props, &tokens::HEADING, accent);
     set_fingers(&mut props, t.fingers, t.layers);
     props
 }
@@ -303,6 +306,7 @@ pub fn dark_theme() -> ThemeProps {
     set(&mut props, &tokens::SPARK_ERROR, hex("#ff1f4c"));
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#1b2542"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#00e5ff"));
+    set(&mut props, &tokens::HEADING, hex("#4fd8ff"));
     set_fingers(&mut props, DARK_FINGERS, DARK_LAYERS);
     props
 }
@@ -385,6 +389,7 @@ pub fn light_theme() -> ThemeProps {
     set(&mut props, &tokens::SPARK_ERROR, hex("#d8173f"));
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#d5d9e3"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#0088b8"));
+    set(&mut props, &tokens::HEADING, hex("#005e86"));
     set_fingers(&mut props, LIGHT_FINGERS, LIGHT_LAYERS);
     props
 }

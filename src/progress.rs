@@ -74,6 +74,38 @@ impl ExerciseMode {
     pub fn is_typing(self) -> bool {
         !matches!(self, ExerciseMode::Shortcuts | ExerciseMode::Hanzi)
     }
+
+    pub fn subject(self) -> Subject {
+        if self == ExerciseMode::Hanzi { Subject::Hanzi } else { Subject::Typing }
+    }
+}
+
+/// What is learned, the first menu: each has its exercises or lessons in the second menu, its
+/// own lessons panel and statistics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Subject {
+    #[default]
+    Typing,
+    Hanzi,
+}
+
+impl Subject {
+    pub const ALL: [Subject; 2] = [Subject::Typing, Subject::Hanzi];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Subject::Typing => "Touch typing",
+            Subject::Hanzi => "Hanzi",
+        }
+    }
+
+    /// The exercises of the second menu.
+    pub fn modes(self) -> &'static [ExerciseMode] {
+        match self {
+            Subject::Typing => &ExerciseMode::ALL[..10],
+            Subject::Hanzi => &ExerciseMode::ALL[10..],
+        }
+    }
 }
 
 /// How much the background shows, see [`crate::background`].
@@ -142,6 +174,9 @@ pub struct Session {
     pub fluidness: f64,
     /// Seconds since the UNIX epoch.
     pub finished_at: u64,
+    /// The hanzi: how close the strokes were to the target, in percent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,6 +275,10 @@ pub struct Progress {
     pub theme: ThemeMode,
     pub layout: LayoutId,
     pub mode: ExerciseMode,
+    /// The last exercise of the touch typing, to go back to it from the hanzi.
+    pub typing_mode: ExerciseMode,
+    /// The toolbar shows when the pointer is near the top, always in the full screen (F11).
+    pub auto_hide_toolbar: bool,
     /// The legends of the keys fade out while typing, they come back on errors.
     pub fade_legends: bool,
     /// Shows the layer and modifier keys to hold for the characters of the other layers.
@@ -291,6 +330,11 @@ pub struct HanziProgress {
     pub words: BTreeMap<String, HanziWordStats>,
     /// The levels done, with their misses.
     pub levels_done: BTreeMap<usize, u32>,
+    /// The weak words are reviewed instead of the level, see [`crate::hanzi::weak_words`].
+    pub review: bool,
+    /// The words of the review, picked when it starts, and the one being written.
+    pub review_words: Vec<String>,
+    pub review_word: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -301,6 +345,20 @@ pub struct HanziWordStats {
     pub strokes: u32,
     pub misses: u32,
     pub pinyin_misses: u32,
+    /// The strokes shown after the misses or with Hint: a penalty, the word is weak.
+    pub glimpses: u32,
+    /// How weak the word is: a glimpse adds to it, a review without help takes one away.
+    pub weak: u32,
+    /// The accuracy of the strokes written, in percent, summed, and their number.
+    pub quality_sum: f64,
+    pub quality_n: u32,
+}
+
+impl HanziWordStats {
+    /// The mean accuracy of the strokes, in percent.
+    pub fn quality(&self) -> Option<f64> {
+        (self.quality_n > 0).then(|| self.quality_sum / self.quality_n as f64)
+    }
 }
 
 impl Default for Progress {
@@ -309,6 +367,8 @@ impl Default for Progress {
             theme: ThemeMode::default(),
             layout: LayoutId::default(),
             mode: ExerciseMode::default(),
+            typing_mode: ExerciseMode::default(),
+            auto_hide_toolbar: false,
             fade_legends: true,
             layer_trainer: true,
             help_seen: false,

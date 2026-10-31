@@ -12,6 +12,18 @@ A typing tutor made with [Bevy](https://bevyengine.org) 0.20 and its
 2. **Chinese hanzi (now, HSK 1 to 4).** The words written stroke by stroke with a pen, a mouse or
    a finger, then typed in pinyin, see [Hanzi](#hanzi).
 
+## Menus and toolbar
+
+The first menu of the toolbar is what you learn, Touch typing or Hanzi, more to come; the second
+one its exercise (touch typing) or its HSK level and the weak words (hanzi). ‹ › go through the
+lessons of the exercise: the basic or the layer lesson, the finger, the hand of the bounces, the
+level within the HSK level. They are grayed out at the ends, before a locked lesson and in the
+exercises without lessons. Lessons and Stats show those of the first menu.
+
+The setting "Hide the toolbar" puts it over the top of the window, it shows when the pointer goes
+to the top or touches it; F11 is the full screen, the toolbar hides there too. Zoomed in, the
+settings, the help and the other panels scroll inside the window.
+
 ## Touch typing
 
 The four Klavaro exercises, with their original texts and goals, and two of Claudralingo:
@@ -231,10 +243,12 @@ with the progress.
 
 ## Stats
 
-The Stats button: today's minutes against the daily goal (10 minutes) and the streak of days that
-met it, the calendars of this month and the previous one (green: a lesson passed that day), the
-words per minute and the accuracy of the last 30 days (point at a day for its value, the goal of
-95% dashed), the exercises by type, and your best and most missed keys. The days are UTC days.
+The Stats button, of the first menu: today's minutes against the daily goal (10 minutes) and the
+streak of days that met it, the calendars of this month and the previous one (green: a lesson
+passed that day), the words per minute and the accuracy of the last 30 days (point at a day for
+its value, the goal of 95% dashed), the exercises by type, and your best and most missed keys.
+For the hanzi: the accuracy of the strokes and the strokes right on the first try, the words by
+HSK level, and the weak, the most missed and the best written words. The days are UTC days.
 
 ## Hanzi
 
@@ -250,10 +264,18 @@ time, in five steps:
 
 A stroke is compared with the strokes of the character as Hanzi Writer does (a port of its
 matcher): its distance, start and end, direction, shape (Fréchet distance) and length. A stroke
-drawn backwards or out of order is named; after three misses the stroke shows. A step with three
-misses is done again. The words are spoken (Listen, or Space while drawing). The pinyin
+drawn backwards or out of order is named. An accepted stroke gets its accuracy, how close it was
+to the target (both resampled along their length, the mean distance and the distances of their
+ends): "横 92%, excellent". After three misses on a stroke it is written before the eyes, the
+glimpse (Hint too): a penalty, it counts as two misses in the accuracy of the word, and the word
+becomes weak. "Weak words" in the second menu reviews the weakest ten; written there without help
+a word is less weak. A step with three misses is done again. The level, the word and a word of
+encouragement show over the drawing when a word starts, then fade. The words are spoken (Listen, or Space while drawing; "Speak the words" beside Listen turns that
+off). The pinyin
 candidates are the HSK words, then the words of the `inputx-pinyin` dictionary, with the
-characters of the embedded font. The data is made by `scripts/prepare_hanzi.py`, see
+characters of the embedded font. Every text falls back on that font for the hanzi, the meanings
+cite some (`as in 意`). The drawing grows with the window, beside the word or under it. The data
+is made by `scripts/prepare_hanzi.py`, see
 `assets/hanzi/LICENSES.md`.
 
 While the outline is there to follow, the name of the next stroke shows beside the drawing
@@ -311,7 +333,8 @@ trunk build --release                    # browser, into dist/
 round trip, `^` clicks the on-screen key the hints point at) and saves a screenshot, to check the
 screen without a keyboard. `CLAUDRALINGO_PREVIEW_LAYER=2` shows a layer, `CLAUDRALINGO_HELP=1`
 keeps the help of the first start open, `CLAUDRALINGO_LESSONS=1` and `CLAUDRALINGO_STATS=1` open
-those panels, `CLAUDRALINGO_HANZI_STROKES=n` draws n strokes of the hanzi on their medians and
+those panels, `CLAUDRALINGO_HANZI_STROKES=n` draws n strokes of the hanzi on their medians (after
+`CLAUDRALINGO_HANZI_MISSES=n` scribbles that miss, for the glimpse) and
 `CLAUDRALINGO_HANZI_INPUT=33` types the pinyin step, `CLAUDRALINGO_STROKES=n` opens the strokes of
 the word on its stroke n (`CLAUDRALINGO_STROKES_BASIC=n` describes the basic stroke n). The keys of the real keyboard are ignored
 during these runs.

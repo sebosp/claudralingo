@@ -60,7 +60,9 @@ pub fn goal(mode: ExerciseMode) -> f64 {
         ExerciseMode::Velocity => 95.0,
         ExerciseMode::Fluidness => 97.0,
         ExerciseMode::Fingers | ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::GOAL_ACCURACY,
-        ExerciseMode::Shortcuts | ExerciseMode::Hanzi => 100.0,
+        ExerciseMode::Shortcuts => 100.0,
+        // The strokes right on the first try, a glimpse counts as two misses.
+        ExerciseMode::Hanzi => 95.0,
     }
 }
 
@@ -663,6 +665,7 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             fluidness: results.fluidness,
             finished_at: now_unix_seconds(),
             elapsed: results.elapsed,
+            quality: None,
         });
     }
     progress.save();

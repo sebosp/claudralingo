@@ -1,6 +1,8 @@
-//! The statistics panel: today and the streak of days with the daily goal met, the calendars
-//! of this month and the previous one (a day is a success when a lesson was passed), the words
-//! per minute and the accuracy of the last 30 days, the exercises by type, and the keys.
+//! The statistics panel, of the subject of the first menu, the touch typing or the hanzi: today
+//! and the streak of days with the daily goal met, the calendars of this month and the previous
+//! one (a day is a success when a lesson was passed), the words per minute and the accuracy of
+//! the last 30 days (the accuracy of the strokes and the strokes right on the first try for the
+//! hanzi), the exercises by type (by HSK level), and the keys (the words).
 //!
 //! The charts follow the dataviz method: one measure per chart and one axis, thin lines with
 //! dots for the days, the goal as a dashed reference line, the values in text colors, a readout
@@ -21,7 +23,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::ui_widgets::Activate;
 use tiny_skia::{FillRule, LineCap, Paint, PathBuilder, Pixmap, Stroke, StrokeDash, Transform};
 
-use crate::progress::{Progress, Session, now_unix_seconds};
+use crate::progress::{ExerciseMode, Progress, Session, Subject, now_unix_seconds};
 use crate::theme::tokens;
 use crate::ui::{Panel, RankingText};
 
@@ -41,6 +43,9 @@ struct ModeBars;
 /// A chart: 0 the words per minute, 1 the accuracy.
 #[derive(Component, Default, Clone)]
 struct Chart(usize);
+/// The titles of the charts, of the exercises and of the rankings, they change with the subject.
+#[derive(Component, Default, Clone)]
+struct Title(usize);
 /// The labels of a chart: its top and bottom values, and the readout of the day under the
 /// pointer.
 #[derive(Component, Default, Clone)]
@@ -49,6 +54,7 @@ struct ChartLabel(usize, u8);
 /// The values of the days, for the readouts.
 #[derive(Resource, Default)]
 struct Days {
+    subject: Subject,
     first: u64,
     wpm: Vec<Option<f64>>,
     accuracy: Vec<Option<f64>>,
@@ -107,15 +113,17 @@ pub fn overlay() -> impl Scene {
             @group()
             Node {
                 width: px(900),
-                max_height: vh(92),
+                max_width: percent(96),
+                max_height: percent(94),
             }
             Children [
-                @group_header() Children [ @label("Stats") ]
+                @group_header() Children [ @label("Stats") Title(0) ]
                 --
                 @group_body()
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: px(12),
+                    min_height: px(0),
                     overflow: Overflow::scroll_y(),
                 }
                 bevy::ui_widgets::ScrollArea
@@ -128,11 +136,11 @@ pub fn overlay() -> impl Scene {
                     }
                     Calendars
                     --
-                    @chart(0, "Words per minute, average of the day")
+                    @chart(0)
                     --
-                    @chart(1, "Accuracy, average of the day, the goal of 95% dashed")
+                    @chart(1)
                     --
-                    @label("Exercises of the last 30 days, by type")
+                    @label("") Title(3)
                     --
                     Node {
                         flex_direction: FlexDirection::Column,
@@ -140,7 +148,7 @@ pub fn overlay() -> impl Scene {
                     }
                     ModeBars
                     --
-                    @label("Your keys")
+                    @label("") Title(4)
                     --
                     @label_dim("") RankingText
                     --
@@ -155,14 +163,14 @@ pub fn overlay() -> impl Scene {
     }
 }
 
-fn chart(index: usize, title: &'static str) -> impl Scene {
+fn chart(index: usize) -> impl Scene {
     bsn! {
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: px(4),
         }
         Children [
-            @label(title)
+            @label("") Title({index + 1})
             --
             Node {
                 flex_direction: FlexDirection::Row,
@@ -263,10 +271,15 @@ pub struct Day {
     pub exercises: usize,
 }
 
-/// The days with sessions, of all the keyboards.
-pub fn days(progress: &Progress) -> BTreeMap<u64, Day> {
+/// The sessions of a subject, of all the keyboards.
+fn sessions(progress: &Progress, subject: Subject) -> impl Iterator<Item = &Session> {
+    progress.layouts.values().flat_map(|l| &l.sessions).filter(move |s| s.mode.subject() == subject)
+}
+
+/// The days with sessions of a subject.
+pub fn days(progress: &Progress, subject: Subject) -> BTreeMap<u64, Day> {
     let mut days: BTreeMap<u64, Day> = BTreeMap::new();
-    for session in progress.layouts.values().flat_map(|l| &l.sessions) {
+    for session in sessions(progress, subject) {
         let day = days.entry(day_of(session.finished_at)).or_default();
         day.seconds += session.elapsed;
         day.exercises += 1;
@@ -290,7 +303,7 @@ pub fn streak(days: &BTreeMap<u64, Day>, today: u64, goal_minutes: u32) -> usize
     streak
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn fill(
     panel: Res<Panel>,
     progress: Res<Progress>,
@@ -298,7 +311,8 @@ fn fill(
     charts: Res<ChartImages>,
     mut images: ResMut<Assets<Image>>,
     mut nodes: Query<(&mut ImageNode, &Chart)>,
-    mut texts: Query<(&mut Text, Option<&TodayText>, Option<&ChartLabel>)>,
+    mut texts: Query<(&mut Text, Option<&TodayText>, Option<&ChartLabel>, Option<&Title>)>,
+    hanzi: Res<crate::hanzi::data::HanziData>,
     calendars: Query<Entity, With<Calendars>>,
     bars: Query<Entity, With<ModeBars>>,
     mut stored: ResMut<Days>,
@@ -310,43 +324,66 @@ fn fill(
     }
     let now = now_unix_seconds();
     let today = day_of(now);
-    let days = days(&progress);
+    let subject = progress.mode.subject();
+    let typing = subject == Subject::Typing;
+    let days = days(&progress, subject);
     let goal = progress.daily_goal_minutes;
     let minutes = days.get(&today).map_or(0.0, |d| d.seconds / 60.0);
     let streak = streak(&days, today, goal);
     let first = today + 1 - DAYS as u64;
-    let recent: Vec<&Session> = progress
-        .layouts
-        .values()
-        .flat_map(|l| &l.sessions)
-        .filter(|s| day_of(s.finished_at) >= first)
-        .collect();
+    let recent: Vec<&Session> = sessions(&progress, subject).filter(|s| day_of(s.finished_at) >= first).collect();
     // The averages of the days.
     let average = |day: u64, value: &dyn Fn(&Session) -> Option<f64>| -> Option<f64> {
         let values: Vec<f64> = recent.iter().filter(|s| day_of(s.finished_at) == day).filter_map(|s| value(s)).collect();
         (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
     };
+    // The first chart: the words per minute, or the accuracy of the strokes.
     let wpm: Vec<Option<f64>> = (first..=today)
-        .map(|d| average(d, &|s: &Session| (s.mode.is_typing() && s.velocity > 0.0).then_some(s.velocity)))
+        .map(|d| {
+            average(d, &|s: &Session| {
+                if typing { (s.mode.is_typing() && s.velocity > 0.0).then_some(s.velocity) } else { s.quality }
+            })
+        })
         .collect();
     let accuracy: Vec<Option<f64>> = (first..=today).map(|d| average(d, &|s: &Session| Some(s.accuracy))).collect();
     let best_wpm = wpm.iter().flatten().copied().fold(0.0, f64::max);
     let today_text = format!(
-        "Today {minutes:.0} of {goal} minutes{} · streak {streak} day{} · {} exercises in 30 days · best day {best_wpm:.0} WPM",
+        "Today {minutes:.0} of {goal} minutes{} · streak {streak} day{} · {} {} in 30 days · best day {best_wpm:.0}{}",
         if minutes >= goal as f64 { ", goal met" } else { "" },
         if streak == 1 { "" } else { "s" },
         recent.len(),
+        if typing { "exercises" } else { "words" },
+        if typing { " WPM" } else { "% stroke accuracy" },
     );
-    // The scales: the words per minute from 0, the accuracy from 50% or lower.
+    // The scales: the words per minute from 0, the accuracies from 50% or lower.
     let wpm_max = (best_wpm.max(10.0) / 10.0).ceil() * 10.0;
-    let accuracy_min = accuracy.iter().flatten().copied().fold(100.0, f64::min).min(80.0).floor().max(0.0);
-    let scales = [(0.0, wpm_max), (accuracy_min, 100.0)];
-    for (mut text, today_label, chart_label) in &mut texts {
-        if today_label.is_some() {
+    let lowest = |values: &[Option<f64>]| values.iter().flatten().copied().fold(100.0, f64::min).min(80.0).floor().max(0.0);
+    let scales = if typing { [(0.0, wpm_max), (lowest(&accuracy), 100.0)] } else { [(lowest(&wpm), 100.0), (lowest(&accuracy), 100.0)] };
+    let titles = if typing {
+        [
+            "Stats · Touch typing",
+            "Words per minute, average of the day",
+            "Accuracy, average of the day, the goal of 95% dashed",
+            "Exercises of the last 30 days, by type",
+            "Your keys",
+        ]
+    } else {
+        [
+            "Stats · Hanzi",
+            "Stroke accuracy, how close the strokes were to the target, average of the day",
+            "Strokes right on the first try, a stroke shown counts as two misses, the goal of 95% dashed",
+            "Words of the last 30 days, by HSK level",
+            "Your words",
+        ]
+    };
+    for (mut text, today_label, chart_label, title) in &mut texts {
+        if let Some(Title(i)) = title {
+            text.0 = titles[*i].into();
+        } else if today_label.is_some() {
             text.0.clone_from(&today_text);
         } else if let Some(ChartLabel(chart, which)) = chart_label {
             let (min, max) = scales[*chart];
-            let unit = if *chart == 0 { "" } else { "%" };
+            let unit = if *chart == 0 && typing { "" } else { "%" };
             text.0 = match which {
                 0 => format!("{max:.0}{unit}"),
                 1 => format!("{min:.0}{unit}"),
@@ -371,7 +408,7 @@ fn fill(
     for (mut node, Chart(i)) in &mut nodes {
         node.image = charts.0[*i].clone();
     }
-    *stored = Days { first, wpm, accuracy };
+    *stored = Days { subject, first, wpm, accuracy };
 
     // The calendars of this month and the previous one.
     let font = |size: f32| TextFont {
@@ -474,24 +511,29 @@ fn fill(
     }
 
     // The exercises by type: one hue, the bars sorted, the counts in text.
-    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for s in &recent {
-        *counts.entry(s.mode.name()).or_default() += 1;
+        let name = match s.lesson.and_then(|l| hanzi.levels.get(l.wrapping_sub(1))) {
+            Some(level) if s.mode == ExerciseMode::Hanzi => format!("HSK {}", level.hsk),
+            _ => s.mode.name().to_string(),
+        };
+        *counts.entry(name).or_default() += 1;
     }
-    let mut counts: Vec<(&str, usize)> = counts.into_iter().collect();
+    let mut counts: Vec<(String, usize)> = counts.into_iter().collect();
     counts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     let most = counts.first().map_or(1, |(_, n)| *n).max(1);
     for root in &bars {
         commands.entity(root).despawn_children();
         if counts.is_empty() {
-            commands.spawn((Text::new("No exercise yet."), font(12.0), ThemeTextColor(feathers_tokens::TEXT_DIM), ChildOf(root)));
+            let none = if typing { "No exercise yet." } else { "No word yet." };
+            commands.spawn((Text::new(none), font(12.0), ThemeTextColor(feathers_tokens::TEXT_DIM), ChildOf(root)));
         }
         for (name, n) in &counts {
             let row = commands
                 .spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(8), align_items: AlignItems::Center, ..default() }, ChildOf(root)))
                 .id();
             commands.spawn((
-                Text::new(*name),
+                Text::new(name.clone()),
                 font(12.0),
                 ThemeTextColor(feathers_tokens::TEXT_MAIN),
                 Node { width: px(200), ..default() },
@@ -599,8 +641,10 @@ fn readout(
     let i = ((x * (values.len() - 1) as f32).round().max(0.0) as usize).min(values.len() - 1);
     let (y, m, d) = civil(days.first + i as u64);
     let value = match values[i] {
-        Some(v) if *chart == 0 => format!("{v:.1} words per minute"),
-        Some(v) => format!("{v:.1}% accuracy"),
+        Some(v) if *chart == 0 && days.subject == Subject::Typing => format!("{v:.1} words per minute"),
+        Some(v) if *chart == 0 => format!("{v:.1}% stroke accuracy"),
+        Some(v) if days.subject == Subject::Typing => format!("{v:.1}% accuracy"),
+        Some(v) => format!("{v:.1}% of the strokes right on the first try"),
         None => "no practice".into(),
     };
     for (mut text, ChartLabel(c, which)) in &mut labels {
