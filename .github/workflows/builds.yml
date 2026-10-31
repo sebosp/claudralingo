@@ -1,11 +1,14 @@
 # The native builds of the game: Linux, an Android APK and an iOS app for the simulator, kept
-# as artifacts of the run, attached to a release for the tags `v*`.
+# as artifacts of the run, attached to a release for the tags `v*`. Pull requests to main run
+# them too, as a check.
 name: Builds
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
