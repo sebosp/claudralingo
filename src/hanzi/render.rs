@@ -3,7 +3,7 @@
 //! brush guide of the next stroke, and the small images of the breakdown of a word.
 use bevy::color::{Color, ColorToComponents, Srgba};
 use bevy::math::Vec2;
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, StrokeDash, Transform};
+use tiny_skia::{FillRule, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, StrokeDash, Transform};
 
 use super::brush::Guide;
 use super::data::{BASELINE, BOX, Glyph, PathOp};
@@ -19,6 +19,9 @@ pub enum Look {
     Outline(f32),
     /// The next stroke, highlighted.
     Next(f32),
+    /// The next stroke written before the eyes, the glimpse after the misses: the part of it
+    /// up to `t` (0 to 1) of its median, with its opacity.
+    Reveal(f32, f32),
     /// Drawn already, in ink.
     Done,
 }
@@ -136,18 +139,48 @@ fn clear(pixmap: &mut Pixmap, colors: &Colors) {
 }
 
 fn strokes(pixmap: &mut Pixmap, glyph: &Glyph, looks: &[Look], colors: &Colors, ts: Transform) {
-    for (ops, look) in glyph.outlines.iter().zip(looks) {
+    for (i, (ops, look)) in glyph.outlines.iter().zip(looks).enumerate() {
         let Some(path) = outline_path(ops) else {
             continue;
         };
-        let paint = match *look {
+        let (paint, mask) = match *look {
             Look::Hidden => continue,
-            Look::Outline(alpha) => paint(colors.outline, alpha),
-            Look::Next(alpha) => paint(colors.next, alpha),
-            Look::Done => paint(colors.ink, 1.0),
+            Look::Outline(alpha) => (paint(colors.outline, alpha), None),
+            Look::Next(alpha) => (paint(colors.next, alpha), None),
+            Look::Reveal(t, alpha) => {
+                (paint(colors.next, alpha), glyph.medians.get(i).and_then(|m| reveal_mask(pixmap, m, t, ts)))
+            }
+            Look::Done => (paint(colors.ink, 1.0), None),
         };
-        pixmap.fill_path(&path, &paint, FillRule::Winding, ts, None);
+        pixmap.fill_path(&path, &paint, FillRule::Winding, ts, mask.as_ref());
     }
+}
+
+/// The part of a stroke written up to `t` of its median: a wide band along the median, cut
+/// square where the brush is, a little longer at the start for the outline before the median.
+fn reveal_mask(pixmap: &Pixmap, median: &[Vec2], t: f32, ts: Transform) -> Option<Mask> {
+    if t >= 1.0 || median.len() < 2 {
+        return None;
+    }
+    let points: Vec<Vec2> = median.iter().map(|p| to_pixels(*p)).collect();
+    let total: f32 = points.windows(2).map(|w| w[0].distance(w[1])).sum();
+    let mut left = total * t.max(0.0);
+    let back = (points[0] - points[1]).normalize_or_zero();
+    let mut part = vec![points[0] + back * 30.0, points[0]];
+    for w in points.windows(2) {
+        let d = w[0].distance(w[1]);
+        if d >= left {
+            part.push(w[0].lerp(w[1], left / d.max(1e-6)));
+            break;
+        }
+        left -= d;
+        part.push(w[1]);
+    }
+    let band = Stroke { width: 140.0, line_cap: LineCap::Butt, line_join: LineJoin::Round, ..Default::default() };
+    let path = polyline(&part)?.stroke(&band, 1.0)?;
+    let mut mask = Mask::new(pixmap.width(), pixmap.height())?;
+    mask.fill_path(&path, FillRule::Winding, true, ts);
+    Some(mask)
 }
 
 /// The ink of a brush: discs at the points joined by quads, their widths varying, drawn opaque
@@ -313,6 +346,15 @@ mod tests {
         draw(&mut pixmap, glyph, &frame, &colors);
         let dark = pixmap.pixels().iter().filter(|p| p.red() < 50).count();
         assert!(dark > 1000, "{dark}");
+        // The glimpse: half of the second stroke is less than all of it.
+        let blue = |pixmap: &Pixmap| pixmap.pixels().iter().filter(|p| p.blue() > 200 && p.red() < 80).count();
+        let half = Frame { looks: &[Look::Done, Look::Reveal(0.5, 1.0)], ..Default::default() };
+        draw(&mut pixmap, glyph, &half, &colors);
+        let n_half = blue(&pixmap);
+        let whole = Frame { looks: &[Look::Done, Look::Reveal(1.0, 1.0)], ..Default::default() };
+        draw(&mut pixmap, glyph, &whole, &colors);
+        let n_whole = blue(&pixmap);
+        assert!(n_half > 500 && n_half < n_whole * 3 / 4, "{n_half} of {n_whole}");
         // A small image of the second stroke, with its guide in red.
         let mut tile = Pixmap::new(SIZE, SIZE).expect("tile");
         let profile = super::super::brush::profile(&glyph.outlines[1], &glyph.medians[1]);

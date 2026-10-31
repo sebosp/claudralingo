@@ -267,6 +267,35 @@ fn subdivide_curve(curve: &[Vec2], max_len: f32) -> Vec<Vec2> {
     out
 }
 
+/// The error of a stroke, in the units of the 1024 box, at which its accuracy is 0%.
+const ZERO_ACCURACY_ERROR: f32 = 200.0;
+
+/// How close a stroke accepted is to the target, 0 to 100%: both resampled along their length,
+/// the mean distance between their points in order, and the distances of their ends. A careful
+/// trace inside the outline is above 90%, a stroke a stroke's width off about 70%.
+pub fn accuracy(user: &[Vec2], median: &[Vec2]) -> f32 {
+    let points = strip_duplicates(user);
+    if points.len() < 2 || median.len() < 2 {
+        return 0.0;
+    }
+    let a = outline_curve(&points, 32);
+    let b = outline_curve(median, 32);
+    let along = a.iter().zip(&b).map(|(p, q)| p.distance(*q)).sum::<f32>() / a.len() as f32;
+    let ends = (a[0].distance(b[0]) + a[a.len() - 1].distance(b[b.len() - 1])) / 2.0;
+    let error = 0.7 * along + 0.3 * ends;
+    (100.0 * (1.0 - error / ZERO_ACCURACY_ERROR)).clamp(0.0, 100.0)
+}
+
+/// In words, for the message after a stroke.
+pub fn accuracy_word(accuracy: f32) -> &'static str {
+    match accuracy {
+        a if a >= 90.0 => "excellent",
+        a if a >= 78.0 => "good",
+        a if a >= 62.0 => "fair, closer to the outline",
+        _ => "rough, follow the outline",
+    }
+}
+
 /// The stroke the user most likely drew, any stroke of the character: for the hints.
 pub fn closest_stroke(user: &[Vec2], medians: &[Vec<Vec2>]) -> Option<usize> {
     let points = strip_duplicates(user);
@@ -319,6 +348,19 @@ mod tests {
         assert_eq!(stroke_matches(&reversed, &medians, 0, o), Outcome::Backwards);
         assert_eq!(stroke_matches(&wobbly(&medians[1]), &medians, 0, o), Outcome::OtherStroke(1));
         assert_eq!(closest_stroke(&wobbly(&medians[1]), &medians), Some(1));
+    }
+
+    #[test]
+    fn accuracies() {
+        let medians = shi();
+        let exact = accuracy(&medians[0], &medians[0]);
+        assert!(exact > 99.0, "{exact}");
+        let wobbly = accuracy(&wobbly(&medians[0]), &medians[0]);
+        assert!((85.0..99.0).contains(&wobbly), "{wobbly}");
+        // A stroke's width below the target.
+        let low: Vec<Vec2> = medians[0].iter().map(|p| *p - Vec2::new(0.0, 80.0)).collect();
+        let low = accuracy(&low, &medians[0]);
+        assert!(low < wobbly && low > 40.0, "{low}");
     }
 
     #[test]

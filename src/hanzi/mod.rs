@@ -19,7 +19,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::feathers::containers::flex_spacer;
 use bevy::feathers::controls::*;
 use bevy::feathers::display::{caption, label, label_dim};
 use bevy::feathers::theme::{ThemeBackgroundColor, ThemeTextColor, UiTheme};
@@ -42,16 +41,43 @@ use matcher::{Options, Outcome};
 use pinyin::{Candidate, Ime};
 use render::{Look, SIZE};
 
-/// The misses on a stroke before its hint shows.
-const MISSES_BEFORE_HINT: u32 = 3;
-const HINT_SECONDS: f32 = 1.6;
+/// The misses on a stroke before it is shown being written, the glimpse.
+const MISSES_BEFORE_GLIMPSE: u32 = 3;
+/// The glimpse: the stroke written in `GLIMPSE_DRAW` seconds, then it stays and fades.
+const GLIMPSE_SECONDS: f32 = 2.8;
+const GLIMPSE_DRAW: f32 = 1.0;
+const GLIMPSE_FADE: f32 = 0.8;
+/// A glimpse counts as this many misses in the accuracy of the word.
+const GLIMPSE_PENALTY: u32 = 2;
+/// The banner of a new word: where it is in the level, and a word of encouragement.
+const BANNER_SECONDS: f32 = 3.5;
+const BANNER_FADE: f32 = 1.2;
+const ENCOURAGEMENTS: [&str; 10] = [
+    "Good luck!",
+    "Have fun!",
+    "Journey before destination.",
+    "One stroke at a time.",
+    "Slow is smooth, smooth is fast.",
+    "加油！ Keep going!",
+    "千里之行，始于足下: a journey of a thousand miles begins with one step.",
+    "Breathe, then write.",
+    "Every master was once a beginner.",
+    "The brush follows the heart.",
+];
 const WRONG_SECONDS: f32 = 0.6;
 /// The last brush stroke stays over the character, to compare its thickness.
 const ECHO_SECONDS: f32 = 1.4;
 /// The misses of a step that repeat it.
 const MISSES_TO_REPEAT: u32 = 3;
-/// The size of the drawing area, in logical pixels.
+/// The size of the drawing area, in logical pixels, it grows with the window, see
+/// [`fit_canvas`].
 const CANVAS: f32 = 380.0;
+const CANVAS_MIN: f32 = 220.0;
+const CANVAS_MAX: f32 = 600.0;
+/// The column beside the drawing: the word, the steps, the buttons and the pinyin; narrower to
+/// keep the drawing beside it.
+const SIDE: f32 = 380.0;
+const SIDE_MIN: f32 = 280.0;
 const WORD_FONT: f32 = 64.0;
 
 /// The steps of a word.
@@ -117,8 +143,15 @@ pub struct Practice {
     drawing: bool,
     /// The last stroke not accepted, fading.
     wrong: Option<(Vec<Vec2>, f32)>,
-    /// The hint of the next stroke, its seconds left.
-    hint: f32,
+    /// The glimpse of the next stroke, its seconds left.
+    glimpse: f32,
+    /// The strokes shown this word, the character and the stroke of the last one.
+    glimpses: u32,
+    glimpsed: Option<(usize, usize)>,
+    /// The accuracies of the strokes accepted this word, in percent.
+    accuracies: Vec<f32>,
+    /// The word is one of the weak words reviewed.
+    reviewing: bool,
     pub message: String,
     /// The letters typed, or the digits of the nine keys.
     pub input: String,
@@ -169,6 +202,11 @@ struct MessageText;
 #[derive(Component, Default, Clone)]
 struct CanvasNode;
 #[derive(Component, Default, Clone)]
+struct SideColumn;
+/// The row of the drawing and the column, it wraps in a narrow window.
+#[derive(Component, Default, Clone)]
+struct DrawingRow;
+#[derive(Component, Default, Clone)]
 struct PinyinPanel;
 #[derive(Component, Default, Clone)]
 struct InputText;
@@ -178,6 +216,13 @@ struct CandidatesRow;
 struct Keypad;
 #[derive(Component, Default, Clone)]
 struct NextLevelButton;
+#[derive(Component, Default, Clone)]
+struct NextLevelCaption;
+/// The banner of a new word over the drawing, fading.
+#[derive(Component, Default, Clone)]
+struct Banner;
+#[derive(Component, Default, Clone)]
+struct BannerText;
 /// The kind of the next stroke and, with the brush, how to write it.
 #[derive(Component, Default, Clone)]
 struct KindText;
@@ -197,8 +242,30 @@ impl Plugin for HanziPlugin {
             .insert_resource(InputMethod(None))
             .add_systems(Startup, setup)
             .add_systems(
+                PostUpdate,
+                (
+                    cjk_fallback_of_propagated.before(bevy::app::PropagateSet::<TextFont>::default()),
+                    cjk_fallback
+                        .after(bevy::app::PropagateSet::<TextFont>::default())
+                        .before(bevy::ui::UiSystems::Content),
+                ),
+            )
+            .add_systems(
                 Update,
-                (start_word, keys, auto_strokes, fade, draw_canvas, update_view, update_kind_text, update_candidates, speak, set_fonts)
+                (
+                    start_word,
+                    keys,
+                    auto_strokes,
+                    fade,
+                    draw_canvas,
+                    update_view,
+                    update_kind_text,
+                    update_candidates,
+                    speak,
+                    set_fonts,
+                    update_banner,
+                    fit_canvas,
+                )
                     .chain()
                     .after(crate::game::GameSystems)
                     .run_if(|progress: Res<Progress>| progress.mode == ExerciseMode::Hanzi),
@@ -219,78 +286,82 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut fonts: R
     commands.insert_resource(HanziFont(fonts.add(Font::from_bytes(data::FONT.to_vec()))));
 }
 
-/// The view, in the column of the window, shown in the hanzi mode.
+/// The view, in the column of the window, shown in the hanzi mode: the drawing and beside it
+/// the word, the step, the buttons and the pinyin; above the drawing when the window is
+/// narrow (the row is reversed and wraps).
 pub fn view() -> impl Scene {
     bsn! {
         Node {
             display: Display::None,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            row_gap: px(10),
+            width: percent(100),
             margin: UiRect::top(px(6)),
         }
         HanziRoot
         Children [
-            // The word, its pinyin and its meaning.
             Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(18),
-                padding: UiRect::axes(px(18), px(8)),
-                border_radius: BorderRadius::all(px(10)),
-                min_width: px(520),
-            }
-            ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
-            Children [
-                Text("") WordText
-                ThemeTextColor(feathers_tokens::TEXT_MAIN)
-                --
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(4),
-                    max_width: px(420),
-                }
-                Children [
-                    @label("") PinyinText
-                    --
-                    @label_dim("") MeaningText
-                ]
-                --
-                @flex_spacer()
-                --
-                @FeathersButton {
-                    @caption: bsn! { @caption("Listen") }
-                }
-                on(listen)
-            ]
-            --
-            @label("") StageText
-            --
-            Node {
-                flex_direction: FlexDirection::Row,
+                flex_direction: FlexDirection::RowReverse,
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::Center,
                 align_items: AlignItems::Start,
                 column_gap: px(16),
+                row_gap: px(10),
+                width: percent(100),
+                padding: UiRect::horizontal(px(8)),
             }
+            DrawingRow
             Children [
-                Node {
-                    width: px(CANVAS),
-                    height: px(CANVAS),
-                    border_radius: BorderRadius::all(px(8)),
-                }
-                ImageNode
-                CanvasNode
-                on(pen_down)
-                on(pen_move)
-                on(pen_up)
-                on(pen_drag_end)
-                --
-                // The buttons and, in its step, the pinyin beside the drawing.
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: px(8),
-                    width: px(300),
+                    width: px(SIDE),
+                    max_width: percent(100),
                 }
+                SideColumn
                 Children [
+                    // The word, its pinyin and its meaning.
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(14),
+                        padding: UiRect::axes(px(14), px(8)),
+                        border_radius: BorderRadius::all(px(10)),
+                    }
+                    ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+                    Children [
+                        Text("") WordText
+                        ThemeTextColor(feathers_tokens::TEXT_MAIN)
+                        --
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(4),
+                            flex_shrink: 1.0,
+                            min_width: px(0),
+                        }
+                        Children [
+                            @label("") PinyinText
+                            --
+                            @label_dim("") MeaningText
+                        ]
+                    ]
+                    --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(10),
+                    }
+                    Children [
+                        @FeathersButton {
+                            @caption: bsn! { @caption("Listen") }
+                        }
+                        on(listen)
+                        --
+                        @crate::ui::setting_checkbox(crate::ui::Setting::Sound, "Speak the words")
+                    ]
+                    --
+                    @label("") StageText
+                    --
                     Node {
                         flex_direction: FlexDirection::Row,
                         flex_wrap: FlexWrap::Wrap,
@@ -314,7 +385,7 @@ pub fn view() -> impl Scene {
                         on(breakdown::open)
                         --
                         @FeathersButton {
-                            @caption: bsn! { @caption("Next level") }
+                            @caption: bsn! { @caption("Next level") NextLevelCaption }
                             @variant: ButtonVariant::Primary,
                         }
                         NextLevelButton
@@ -358,11 +429,52 @@ pub fn view() -> impl Scene {
                             -- @t9_key('<', "⌫") -- @t9_key(' ', "Pick") -- @t9_key('x', "Clear")
                         ]
                     ]
+                    --
+                    @label("") MessageText
+                ]
+                --
+                Node {
+                    width: px(CANVAS),
+                    height: px(CANVAS),
+                    border_radius: BorderRadius::all(px(8)),
+                }
+                ImageNode
+                CanvasNode
+                on(pen_down)
+                on(pen_move)
+                on(pen_up)
+                on(pen_drag_end)
+                Children [
+                    // Over the bottom of the drawing, the strokes start at the top; it lets the
+                    // pen through.
+                    Node {
+                        position_type: PositionType::Absolute,
+                        bottom: px(14),
+                        left: px(0),
+                        width: percent(100),
+                        display: Display::None,
+                        justify_content: JustifyContent::Center,
+                    }
+                    Banner
+                    Pickable::IGNORE
+                    Children [
+                        Node {
+                            padding: UiRect::axes(px(16), px(8)),
+                            border_radius: BorderRadius::all(px(10)),
+                            max_width: percent(92),
+                        }
+                        BackgroundColor(Color::NONE)
+                        Pickable::IGNORE
+                        Children [
+                            Text("") BannerText
+                            TextColor(Color::NONE)
+
+                            TextLayout { justify: Justify::Center }
+                            Pickable::IGNORE
+                        ]
+                    ]
                 ]
             ]
-            --
-            @label("") MessageText
-            TextLayout { justify: Justify::Center }
         ]
     }
 }
@@ -378,11 +490,56 @@ fn t9_key(key: char, text: &'static str) -> impl Scene {
     }
 }
 
-/// The CJK font on the texts of hanzi, the feathers font does not have them.
-fn set_fonts(font: Res<HanziFont>, mut texts: Query<&mut TextFont, Added<WordText>>) {
-    for mut text in &mut texts {
+/// The CJK font on the texts of hanzi, the feathers font does not have them; the font of
+/// feathers on the banner.
+fn set_fonts(
+    font: Res<HanziFont>,
+    asset_server: Res<AssetServer>,
+    mut words: Query<&mut TextFont, (Added<WordText>, Without<BannerText>)>,
+    mut banners: Query<&mut TextFont, Added<BannerText>>,
+) {
+    for mut text in &mut words {
         text.font = FontSource::Handle(font.0.clone());
         text.font_size = FontSize::Px(WORD_FONT);
+    }
+    for mut text in &mut banners {
+        text.font = FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::REGULAR));
+        text.font_size = FontSize::Px(17.0);
+    }
+}
+
+/// The font with the CJK font after it: the characters it has not are taken from that one. The
+/// meanings cite hanzi (`as in 意`), the Fira fonts of feathers have none, they showed boxes.
+fn with_cjk(source: &FontSource, cjk: &Handle<Font>) -> Option<FontSource> {
+    match source {
+        FontSource::Handle(handle) if handle != cjk => {
+            Some(FontSource::List(vec![FontSource::Handle(handle.clone()), FontSource::Handle(cjk.clone())]))
+        }
+        _ => None,
+    }
+}
+
+/// The fonts that feathers hands down to the texts of its widgets.
+fn cjk_fallback_of_propagated(mut fonts: Query<&mut bevy::app::Propagate<TextFont>>, cjk: Option<Res<HanziFont>>) {
+    let Some(cjk) = cjk else {
+        return;
+    };
+    for mut propagate in &mut fonts {
+        if let Some(font) = with_cjk(&propagate.0.font, &cjk.0) {
+            propagate.0.font = font;
+        }
+    }
+}
+
+/// The fonts of the other texts.
+fn cjk_fallback(mut fonts: Query<&mut TextFont, Changed<TextFont>>, cjk: Option<Res<HanziFont>>) {
+    let Some(cjk) = cjk else {
+        return;
+    };
+    for mut text in &mut fonts {
+        if let Some(font) = with_cjk(&text.font, &cjk.0) {
+            text.font = font;
+        }
     }
 }
 
@@ -397,8 +554,20 @@ fn taken_out(stroke: usize, n_strokes: usize, word: usize) -> bool {
 
 impl Practice {
     fn begin(&mut self, word: usize) {
-        *self = Practice { word, dirty: true, started: true, begun: crate::progress::now_unix_seconds(), ..default() };
+        let reviewing = self.reviewing;
+        *self = Practice { word, reviewing, dirty: true, started: true, begun: crate::progress::now_unix_seconds(), ..default() };
         self.message = "A new word: listen, then trace its strokes.".into();
+    }
+
+    /// Shows the next stroke being written. A penalty, once per stroke: the word becomes weak.
+    fn show_glimpse(&mut self) {
+        self.glimpse = GLIMPSE_SECONDS;
+        self.dirty = true;
+        let at = (self.char_index, self.stroke);
+        if self.glimpsed != Some(at) {
+            self.glimpsed = Some(at);
+            self.glimpses += 1;
+        }
     }
 
     fn word<'a>(&self, data: &'a HanziData) -> &'a data::Word {
@@ -432,16 +601,18 @@ impl Practice {
         self.skip_given(data);
     }
 
-    /// The looks of the strokes of the current character.
-    fn looks(&self, n: usize) -> Vec<Look> {
+    /// The looks of the strokes of the current character; without the motion, the glimpse is
+    /// the whole stroke at once.
+    fn looks(&self, n: usize, motion: bool) -> Vec<Look> {
         (0..n)
             .map(|i| {
                 let given = self.stage == Stage::Partial && !taken_out(i, n, self.word);
                 if i < self.stroke || given {
                     return Look::Done;
                 }
-                if i == self.stroke && self.hint > 0.0 {
-                    return Look::Next(0.75 * (self.hint / HINT_SECONDS).min(1.0));
+                if i == self.stroke && self.glimpse > 0.0 {
+                    let written = if motion { (GLIMPSE_SECONDS - self.glimpse) / GLIMPSE_DRAW } else { 1.0 };
+                    return Look::Reveal(written.min(1.0), 0.85 * (self.glimpse / GLIMPSE_FADE).min(1.0));
                 }
                 match self.stage {
                     Stage::Trace if i == self.stroke => Look::Next(0.5),
@@ -466,18 +637,47 @@ fn start_word(
     if restart.read().count() > 0 {
         practice.started = false;
     }
-    let level = progress.hanzi.level.min(data.levels.len() - 1);
-    // Another level picked, with ‹ › or the lessons.
-    if practice.started && (data.level_of(practice.word) == level || practice.level_done && !progress.is_changed()) {
+    // Another level or the review picked, with ‹ › or the menus.
+    let (word, reviewing) = target_word(&progress, &data);
+    if practice.started && practice.word == word && practice.reviewing == reviewing {
         return;
     }
-    if practice.started && practice.level_done && data.level_of(practice.word) == level {
-        return;
-    }
-    let words = &data.levels[level].words;
-    let word = (words.start + progress.hanzi.word).min(words.end - 1);
+    practice.reviewing = reviewing;
     practice.begin(word);
     speaker.say(&data.words[word].word);
+}
+
+/// The word to write: the one of the review, else the one of the level.
+fn target_word(progress: &Progress, data: &HanziData) -> (usize, bool) {
+    let hanzi = &progress.hanzi;
+    if hanzi.review
+        && let Some(word) = hanzi.review_words.get(hanzi.review_word).and_then(|w| data.index_of(w))
+    {
+        return (word, true);
+    }
+    let words = &data.levels[hanzi.level.min(data.levels.len() - 1)].words;
+    ((words.start + hanzi.word).min(words.end - 1), false)
+}
+
+/// The weak words: a stroke of them was shown, the weakest first, then the most missed.
+pub fn weak_words(progress: &Progress, data: &HanziData) -> Vec<String> {
+    let mut words: Vec<(&String, &HanziWordStats)> =
+        progress.hanzi.words.iter().filter(|(w, s)| s.weak > 0 && data.index_of(w).is_some()).collect();
+    words.sort_by(|a, b| b.1.weak.cmp(&a.1.weak).then(b.1.misses.cmp(&a.1.misses)));
+    words.into_iter().take(data::WORDS_PER_LEVEL).map(|(w, _)| w.clone()).collect()
+}
+
+/// Starts the review of the weak words, false without any.
+pub fn start_review(progress: &mut Progress, data: &HanziData) -> bool {
+    let words = weak_words(progress, data);
+    if words.is_empty() {
+        return false;
+    }
+    progress.hanzi.review = true;
+    progress.hanzi.review_words = words;
+    progress.hanzi.review_word = 0;
+    progress.save();
+    true
 }
 
 impl Speaker {
@@ -532,9 +732,9 @@ fn listen(_: On<Activate>, practice: Res<Practice>, data: Res<HanziData>, mut sp
 fn show_hint(_: On<Activate>, mut practice: ResMut<Practice>, mut focus: ResMut<InputFocus>) {
     if practice.stage == Stage::Pinyin {
         practice.message = "The pinyin is under the word in the first steps, listen to it.".into();
-    } else {
-        practice.hint = HINT_SECONDS;
-        practice.dirty = true;
+    } else if !practice.level_done {
+        practice.show_glimpse();
+        practice.message = "Watch the stroke written, then write it. The word goes to your weak words.".into();
     }
     focus.clear();
 }
@@ -547,15 +747,27 @@ fn restart_word(_: On<Activate>, mut practice: ResMut<Practice>, data: Res<Hanzi
 }
 
 fn next_level(_: On<Activate>, mut practice: ResMut<Practice>, mut progress: ResMut<Progress>, data: Res<HanziData>, mut focus: ResMut<InputFocus>) {
-    let level = progress.hanzi.level + 1;
-    go_to_level(&mut practice, &mut progress, &data, level);
+    after_level(&mut practice, &mut progress, &data);
     focus.clear();
+}
+
+/// At the end of a level the next one, at the end of the review the level again.
+fn after_level(practice: &mut Practice, progress: &mut Progress, data: &HanziData) {
+    if progress.hanzi.review {
+        progress.hanzi.review = false;
+        progress.save();
+        practice.started = false;
+    } else {
+        let level = progress.hanzi.level + 1;
+        go_to_level(practice, progress, data, level);
+    }
 }
 
 /// Starts a level of the hanzi mode, its first word.
 pub fn go_to_level(practice: &mut Practice, progress: &mut Progress, data: &HanziData, level: usize) {
     progress.hanzi.level = level.min(data.levels.len() - 1);
     progress.hanzi.word = 0;
+    progress.hanzi.review = false;
     progress.save();
     practice.started = false;
 }
@@ -675,15 +887,19 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
         Outcome::Match => {
             practice.word_strokes += 1;
             practice.misses_on_stroke = 0;
-            practice.hint = 0.0;
+            practice.glimpse = 0.0;
             practice.stroke += 1;
             practice.skip_given(data);
-            practice.message.clear();
-            // With the brush: its thickness against the stroke's, the ink stays a moment.
+            // How close it was, and with the brush its thickness against the stroke's, the ink
+            // stays a moment.
+            let accuracy = matcher::accuracy(&points, &glyph.medians[stroke]);
+            practice.accuracies.push(accuracy);
+            let kind = glyph.kinds.get(stroke).map_or("", |k| k.hanzi);
+            practice.message = format!("{kind} {accuracy:.0}%, {}.", matcher::accuracy_word(accuracy));
             if !widths.is_empty() {
                 let target = brush::profile(&glyph.outlines[stroke], &glyph.medians[stroke]);
                 if let Some(advice) = brush::advice(&target, &brush::along(&ink, &widths, 24)) {
-                    practice.message = format!("{} {advice}", glyph.kinds.get(stroke).map_or("", |k| k.hanzi));
+                    practice.message = format!("{} {advice}", practice.message);
                 }
                 practice.echo = Some((ink, widths, ECHO_SECONDS));
             }
@@ -705,9 +921,9 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
                 }
                 _ => format!("Not quite: stroke {} of {n}.", stroke + 1),
             };
-            if practice.misses_on_stroke >= MISSES_BEFORE_HINT {
-                practice.hint = HINT_SECONDS;
-                practice.message.push_str(" Here it is.");
+            if practice.misses_on_stroke >= MISSES_BEFORE_GLIMPSE {
+                practice.show_glimpse();
+                practice.message.push_str(" Watch it written, then write it: the word goes to your weak words.");
             }
         }
     }
@@ -760,8 +976,7 @@ fn keys(
         };
         if practice.level_done {
             if c == UPSYM {
-                let level = progress.hanzi.level + 1;
-                go_to_level(&mut practice, &mut progress, &data, level);
+                after_level(&mut practice, &mut progress, &data);
             }
             continue;
         }
@@ -852,9 +1067,23 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
     stats.practiced += 1;
     stats.strokes += practice.word_strokes;
     stats.misses += practice.word_misses;
-    // A session for the statistics of the day: the accuracy of the strokes.
+    // The strokes shown make the word weak, a word written without them less so.
+    stats.glimpses += practice.glimpses;
+    if practice.glimpses > 0 {
+        stats.weak += practice.glimpses;
+    } else {
+        stats.weak = stats.weak.saturating_sub(1);
+    }
+    let quality = (!practice.accuracies.is_empty())
+        .then(|| practice.accuracies.iter().map(|a| *a as f64).sum::<f64>() / practice.accuracies.len() as f64);
+    if let Some(q) = quality {
+        stats.quality_sum += q * practice.accuracies.len() as f64;
+        stats.quality_n += practice.accuracies.len() as u32;
+    }
+    // A session for the statistics of the day: the strokes right on the first try, a glimpse
+    // counts as misses.
     let now = crate::progress::now_unix_seconds();
-    let total = (practice.word_strokes + practice.word_misses).max(1);
+    let total = (practice.word_strokes + practice.word_misses + GLIMPSE_PENALTY * practice.glimpses).max(1);
     let session = crate::progress::Session {
         mode: ExerciseMode::Hanzi,
         lesson: Some(data.level_of(practice.word) + 1),
@@ -863,8 +1092,30 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
         fluidness: 0.0,
         finished_at: now,
         elapsed: now.saturating_sub(practice.begun).min(600) as f64,
+        quality,
     };
     progress.current().sessions.push(session);
+    let learned = match quality {
+        Some(q) => format!("{} ({}) learned, the strokes {q:.0}% accurate", word.word, word.pinyin),
+        None => format!("{} ({}) learned", word.word, word.pinyin),
+    };
+    if progress.hanzi.review {
+        let hanzi = &mut progress.hanzi;
+        hanzi.review_word += 1;
+        if let Some(next) = hanzi.review_words.get(hanzi.review_word).and_then(|w| data.index_of(w)) {
+            progress.save();
+            practice.begin(next);
+            practice.message = format!("{learned}. The next weak word.");
+        } else {
+            let n = hanzi.review_words.len();
+            progress.save();
+            practice.level_done = true;
+            practice.candidates.clear();
+            practice.input.clear();
+            practice.message = format!("{learned}. The {n} weak words reviewed! Enter or Back to the level.");
+        }
+        return;
+    }
     let level = data.level_of(practice.word);
     let range = data.levels[level].words.clone();
     if practice.word + 1 < range.end {
@@ -873,7 +1124,7 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
         progress.save();
         let next = practice.word + 1;
         practice.begin(next);
-        practice.message = format!("{} ({}) learned. The next word.", word.word, word.pinyin);
+        practice.message = format!("{learned}. The next word.");
         // The word just picked is spoken first, the next one with Listen.
     } else {
         let misses: u32 = range.clone().filter_map(|w| progress.hanzi.words.get(&data.words[w].word)).map(|s| s.misses).sum();
@@ -884,7 +1135,7 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
         practice.candidates.clear();
         practice.input.clear();
         practice.message = format!(
-            "Level {} done, {} words! Enter or Next level for the next ten.",
+            "{learned}. Level {} done, {} words! Enter or Next level for the next ten.",
             level + 1,
             range.len()
         );
@@ -892,8 +1143,9 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
 }
 
 /// For the screenshots of the snapshot harness: `CLAUDRALINGO_HANZI_STROKES` strokes written
-/// on their medians, one every few frames, and `CLAUDRALINGO_HANZI_INPUT` typed in the pinyin
-/// step.
+/// on their medians, one every few frames, after `CLAUDRALINGO_HANZI_MISSES` scribbles that
+/// miss, and `CLAUDRALINGO_HANZI_INPUT` typed in the pinyin step.
+#[allow(clippy::too_many_arguments)]
 fn auto_strokes(
     mut practice: ResMut<Practice>,
     mut progress: ResMut<Progress>,
@@ -902,6 +1154,7 @@ fn auto_strokes(
     mut ime: ResMut<InputMethod>,
     mut frame: Local<u32>,
     mut done: Local<usize>,
+    mut missed: Local<usize>,
 ) {
     let Some(strokes) = std::env::var("CLAUDRALINGO_HANZI_STROKES").ok().and_then(|n| n.parse::<usize>().ok()) else {
         return;
@@ -910,7 +1163,13 @@ fn auto_strokes(
     if *frame < 60 || !frame.is_multiple_of(3) {
         return;
     }
-    if *done < strokes && practice.stage != Stage::Pinyin {
+    let misses = std::env::var("CLAUDRALINGO_HANZI_MISSES").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0);
+    if *missed < misses {
+        practice.ink = vec![Vec2::new(30.0, 470.0), Vec2::new(60.0, 480.0), Vec2::new(40.0, 500.0)];
+        practice.drawing = true;
+        finish_stroke(&mut practice, &data, &mut speaker);
+        *missed += 1;
+    } else if *done < strokes && practice.stage != Stage::Pinyin {
         let Some(glyph) = practice.current_char(&data).and_then(|c| data.glyph(c)).cloned() else {
             return;
         };
@@ -939,8 +1198,8 @@ fn auto_strokes(
 
 fn fade(time: Res<Time>, mut practice: ResMut<Practice>) {
     let dt = time.delta_secs();
-    if practice.hint > 0.0 {
-        practice.hint = (practice.hint - dt).max(0.0);
+    if practice.glimpse > 0.0 {
+        practice.glimpse = (practice.glimpse - dt).max(0.0);
         practice.dirty = true;
     }
     if let Some((_, left)) = practice.wrong.as_mut() {
@@ -964,11 +1223,11 @@ fn fade(time: Res<Time>, mut practice: ResMut<Practice>) {
 /// The brush guide of the next stroke, for the word, the character and the stroke.
 type GuideCache = Option<((usize, usize, usize), brush::Guide)>;
 
-/// The brush guide is shown: the outline is there to follow, or the hint.
+/// The brush guide is shown: the outline is there to follow, or the glimpse.
 fn shows_guide(practice: &Practice, progress: &Progress) -> bool {
     progress.brush
         && !practice.level_done
-        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.hint > 0.0 && practice.stage != Stage::Pinyin)
+        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.glimpse > 0.0 && practice.stage != Stage::Pinyin)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1002,7 +1261,7 @@ fn draw_canvas(
             let looks = if practice.stage == Stage::Pinyin || practice.level_done {
                 vec![Look::Done; n]
             } else {
-                practice.looks(n)
+                practice.looks(n, !progress.reduce_motion)
             };
             let wrong = practice.wrong.as_ref().map(|(p, t)| (p.as_slice(), (t / WRONG_SECONDS).clamp(0.0, 1.0)));
             let echo = practice.echo.as_ref().map(|(p, w, t)| (p.as_slice(), w.as_slice(), (t / ECHO_SECONDS).clamp(0.0, 1.0)));
@@ -1048,6 +1307,7 @@ fn update_view(
         Query<&mut Text, With<StageText>>,
         Query<&mut Text, With<MessageText>>,
         Query<&mut Text, With<InputText>>,
+        Query<&mut Text, With<NextLevelCaption>>,
     )>,
     mut panels: ParamSet<(
         Query<&mut Node, With<PinyinPanel>>,
@@ -1059,8 +1319,6 @@ fn update_view(
         return;
     }
     let word = practice.word(&data);
-    let level = data.level_of(practice.word);
-    let info = &data.levels[level];
     let pinyin_step = practice.stage == Stage::Pinyin && !practice.level_done;
     let memory = practice.stage == Stage::Memory && !practice.level_done;
     let set = |text: &mut Text, value: String| {
@@ -1078,17 +1336,13 @@ fn update_view(
     for mut t in &mut texts.p2() {
         set(&mut t, word.meaning.clone());
     }
+    // Where the word is in the level shows in the banner when it starts, see `update_banner`.
     let n_chars = word.word.chars().count();
     let stage = if practice.level_done {
-        format!("HSK {} · level {}/{} done", info.hsk, info.part, info.parts)
+        format!("{}: done", place(&progress, &data, &practice, false))
     } else {
         format!(
-            "HSK {} · level {}/{} · word {}/{} · step {} of 5: {}{}",
-            info.hsk,
-            info.part,
-            info.parts,
-            practice.word + 1 - info.words.start,
-            info.words.len(),
+            "Step {} of 5: {}{}",
             practice.stage.number(),
             practice.stage.instructions(),
             if n_chars > 1 && !pinyin_step {
@@ -1117,6 +1371,9 @@ fn update_view(
     for mut t in &mut texts.p5() {
         set(&mut t, input.clone());
     }
+    for mut t in &mut texts.p6() {
+        set(&mut t, if progress.hanzi.review { "Back to the level".into() } else { "Next level".into() });
+    }
     let show = |visible: bool| if visible { Display::Flex } else { Display::None };
     for mut node in &mut panels.p0() {
         node.display = show(pinyin_step);
@@ -1126,6 +1383,113 @@ fn update_view(
     }
     for mut node in &mut panels.p2() {
         node.display = show(practice.level_done);
+    }
+}
+
+/// Where the word is: `HSK 1 · level 3/15 · word 2/10`, or in the review of the weak words.
+pub fn place(progress: &Progress, data: &HanziData, practice: &Practice, with_word: bool) -> String {
+    let hanzi = &progress.hanzi;
+    if hanzi.review {
+        let n = hanzi.review_words.len();
+        return if with_word { format!("Weak words · word {}/{n}", (hanzi.review_word + 1).min(n)) } else { "Weak words".into() };
+    }
+    let info = &data.levels[data.level_of(practice.word)];
+    let level = format!("HSK {} · level {}/{}", info.hsk, info.part, info.parts);
+    if with_word { format!("{level} · word {}/{}", practice.word + 1 - info.words.start, info.words.len()) } else { level }
+}
+
+/// The banner of a new word over the drawing, then it fades.
+#[allow(clippy::too_many_arguments)]
+fn update_banner(
+    practice: Res<Practice>,
+    progress: Res<Progress>,
+    data: Res<HanziData>,
+    theme: Res<UiTheme>,
+    time: Res<Time>,
+    mut banners: Query<(&mut Node, &Children), With<Banner>>,
+    mut pills: Query<&mut BackgroundColor>,
+    mut texts: Query<(&mut Text, &mut TextColor), With<BannerText>>,
+    mut shown: Local<Option<(usize, bool, u64)>>,
+    mut left: Local<f32>,
+    mut next: Local<usize>,
+) {
+    // Every start of a word, also back from the touch typing.
+    let key = (practice.word, practice.reviewing, practice.begun);
+    if practice.started && *shown != Some(key) {
+        *shown = Some(key);
+        *left = BANNER_SECONDS;
+        let encouragement = ENCOURAGEMENTS[*next % ENCOURAGEMENTS.len()];
+        *next += 1 + fastrand::usize(..3);
+        for (mut text, _) in &mut texts {
+            text.0 = format!("{}\n{encouragement}", place(&progress, &data, &practice, true));
+        }
+    } else if *left <= 0.0 {
+        return;
+    }
+    *left -= time.delta_secs();
+    let alpha = (*left / BANNER_FADE).clamp(0.0, 1.0);
+    for (mut node, children) in &mut banners {
+        node.display = if *left > 0.0 { Display::Flex } else { Display::None };
+        for child in children.iter() {
+            if let Ok(mut background) = pills.get_mut(child) {
+                background.0 = theme.color(&feathers_tokens::WINDOW_BG).with_alpha(0.92 * alpha);
+            }
+        }
+    }
+    for (_, mut color) in &mut texts {
+        color.0 = theme.color(&feathers_tokens::TEXT_MAIN).with_alpha(alpha);
+    }
+}
+
+/// The drawing as big as the window allows: beside the column of the word when there is room,
+/// that column narrower if need be, else under it; over it in a window wider than high, the
+/// drawing first.
+#[allow(clippy::type_complexity)]
+fn fit_canvas(
+    window: Single<&Window>,
+    scale: Res<UiScale>,
+    bars: Query<
+        (&ComputedNode, &Node),
+        (Or<(With<crate::ui::Toolbar>, With<crate::ui::ActionsBar>)>, Without<CanvasNode>, Without<SideColumn>, Without<DrawingRow>),
+    >,
+    mut nodes: ParamSet<(
+        Query<&mut Node, With<CanvasNode>>,
+        Query<&mut Node, With<SideColumn>>,
+        Query<&mut Node, With<DrawingRow>>,
+    )>,
+) {
+    let size = window.size() / scale.0.max(0.1);
+    // The toolbar over the window when it hides takes no room.
+    let bars: f32 = bars
+        .iter()
+        .filter(|(_, node)| node.position_type == PositionType::Relative)
+        .map(|(computed, _)| computed.size().y * computed.inverse_scale_factor)
+        .sum();
+    let free_height = size.y - bars - 40.0;
+    let free_width = size.x - 32.0;
+    let beside = free_width - SIDE_MIN - 16.0 >= CANVAS_MIN;
+    let wrap = if !beside && size.x > size.y { FlexWrap::WrapReverse } else { FlexWrap::Wrap };
+    let (canvas, side) = if beside {
+        let canvas = free_height.min(free_width - SIDE_MIN - 16.0).clamp(CANVAS_MIN, CANVAS_MAX).floor();
+        (canvas, (free_width - canvas - 16.0).clamp(SIDE_MIN, SIDE).floor())
+    } else {
+        (free_width.min((free_height - 180.0).max(CANVAS_MIN)).clamp(CANVAS_MIN, CANVAS_MAX).floor(), SIDE)
+    };
+    for mut node in &mut nodes.p0() {
+        if node.width != px(canvas) {
+            node.width = px(canvas);
+            node.height = px(canvas);
+        }
+    }
+    for mut node in &mut nodes.p1() {
+        if node.width != px(side) {
+            node.width = px(side);
+        }
+    }
+    for mut node in &mut nodes.p2() {
+        if node.flex_wrap != wrap {
+            node.flex_wrap = wrap;
+        }
     }
 }
 
@@ -1148,7 +1512,7 @@ fn update_kind_text(
     let glyph = practice.current_char(&data).and_then(|c| data.glyph(c));
     let visible = !practice.level_done
         && practice.stage != Stage::Pinyin
-        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.hint > 0.0);
+        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.glimpse > 0.0);
     let text = match glyph.and_then(|g| g.kinds.get(practice.stroke).map(|k| (k, g.kinds.len()))) {
         Some((kind, n)) if visible => {
             let mut text = format!("Stroke {} of {n}: {} {}, {}", practice.stroke + 1, kind.hanzi, kind.pinyin, kind.english);
@@ -1266,5 +1630,52 @@ mod tests {
         draw(&mut practice, &mut speaker, 0);
         draw(&mut practice, &mut speaker, 1);
         assert_eq!(practice.stage, Stage::Pinyin);
+    }
+
+    #[test]
+    fn a_glimpse_makes_the_word_weak() {
+        let data = HanziData::load();
+        let mut progress = Progress::default();
+        let mut practice = Practice::default();
+        let mut speaker = Speaker::default();
+        let word = data.index_of("人").expect("人");
+        practice.begin(word);
+        // Three scribbles on the first stroke: it is shown, once.
+        for _ in 0..MISSES_BEFORE_GLIMPSE + 1 {
+            practice.ink = vec![Vec2::new(30.0, 470.0), Vec2::new(60.0, 480.0), Vec2::new(40.0, 500.0)];
+            practice.drawing = true;
+            finish_stroke(&mut practice, &data, &mut speaker);
+        }
+        assert!(practice.glimpse > 0.0);
+        assert_eq!(practice.glimpses, 1);
+        assert!(matches!(practice.looks(2, true)[0], Look::Reveal(t, _) if t < 0.1));
+        // The stroke on its median: accepted, its accuracy near 100%.
+        let glyph = data.glyph('人').expect("人").clone();
+        practice.ink = glyph.medians[0].iter().map(|p| render::to_pixels(*p)).collect();
+        practice.drawing = true;
+        finish_stroke(&mut practice, &data, &mut speaker);
+        assert_eq!(practice.stroke, 1);
+        assert!(practice.accuracies[0] > 95.0, "{:?}", practice.accuracies);
+        assert!(practice.message.contains("excellent"), "{}", practice.message);
+        // The word picked: it is weak, the session counts the glimpse.
+        practice.stage = Stage::Pinyin;
+        practice.candidates = vec![Candidate { word: "人".into(), pinyin: "rén".into() }];
+        pick_candidate(&mut practice, &mut progress, &data, &mut speaker, 0);
+        let stats = &progress.hanzi.words["人"];
+        assert_eq!((stats.glimpses, stats.weak), (1, 1));
+        let session = progress.current().sessions.last().cloned().expect("a session");
+        assert!(session.accuracy < 50.0 && session.quality.is_some(), "{session:?}");
+        assert_eq!(weak_words(&progress, &data), vec!["人".to_string()]);
+        // The review: the word again, then back to the level; written without help, less weak.
+        assert!(start_review(&mut progress, &data));
+        assert_eq!(target_word(&progress, &data), (word, true));
+        practice.begin(word);
+        practice.stage = Stage::Pinyin;
+        practice.candidates = vec![Candidate { word: "人".into(), pinyin: "rén".into() }];
+        pick_candidate(&mut practice, &mut progress, &data, &mut speaker, 0);
+        assert!(practice.level_done);
+        assert_eq!(progress.hanzi.words["人"].weak, 0);
+        after_level(&mut practice, &mut progress, &data);
+        assert!(!progress.hanzi.review);
     }
 }

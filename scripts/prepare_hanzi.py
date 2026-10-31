@@ -144,8 +144,9 @@ if __name__ == "__main__" and len(sys.argv) == 1:
 
 
 def subset_font():
-    """The hanzi of the words in Noto Sans CJK SC (SIL Open Font License), only those and the
-    ones of the texts of src/hanzi (the names of the strokes): the whole font is 16 MB. Needs
+    """The hanzi of the words in Noto Sans CJK SC (SIL Open Font License), only those, the ones
+    their meanings cite (`as in 意`) and the ones of the texts of src/hanzi (the names of the
+    strokes): the whole font is 16 MB. Needs
     fonttools and the font, NOTO_CJK or the path of Arch Linux."""
     import glob
     import subprocess
@@ -153,6 +154,7 @@ def subset_font():
     ttc = os.environ.get("NOTO_CJK", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc")
     words = json.load(open(f"{OUT}/words.json"))
     text = "".join(w["w"] for w in words) + "，。？！、：；“”（）·"
+    text += "".join(sorted({c for w in words for c in w["m"] if c >= "\u2e80"}))
     for path in sorted(glob.glob("src/hanzi/*.rs")):
         text += "".join(sorted({c for c in open(path).read() if "\u3400" <= c <= "\u9fff"}))
     with open(f"{CACHE}/subset.txt", "w") as f:

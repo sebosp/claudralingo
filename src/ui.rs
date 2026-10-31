@@ -10,6 +10,7 @@ use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
 use bevy::ui::{Checked, Selected};
 use bevy::input::mouse::MouseScrollPixelsPerLine;
+use bevy::input::touch::Touches;
 use bevy::picking::events::{PointerClick, PointerScroll};
 use bevy::ui_widgets::{Activate, ValueChange};
 
@@ -18,7 +19,7 @@ use crate::game::{ActiveLayout, Exercise, NewExercise, go_to_suggestion};
 use crate::klavaro::N_BASIC_LESSONS;
 use crate::klavaro::tutor::Query as TutorQuery;
 use crate::layout::{LayoutId, finger_name};
-use crate::progress::{BackgroundLevel, ExerciseMode, Progress};
+use crate::progress::{BackgroundLevel, ExerciseMode, LayoutProgress, Progress, Subject};
 use crate::shortcuts::Drill;
 use crate::theme::{ThemeMode, tokens};
 use crate::zoom::Zoom;
@@ -67,15 +68,36 @@ pub struct RankingText;
 #[derive(Component, Default, Clone)]
 struct AccuracyText;
 
+/// The first menu: touch typing or hanzi.
 #[derive(Component, Default, Clone)]
-struct ModeSelect;
+struct SubjectSelect;
+
+/// The second menu: the exercises of the touch typing, or the HSK levels and the weak words.
+#[derive(Component, Default, Clone)]
+struct TypingSelect;
+#[derive(Component, Default, Clone)]
+struct HanziSelect;
+
+/// The toolbar at the top, it hides with the setting and in the full screen.
+#[derive(Component, Default, Clone)]
+pub struct Toolbar;
+
+/// The keys of the moment, at the bottom.
+#[derive(Component, Default, Clone)]
+pub struct ActionsBar;
+
+/// ‹ and ›, disabled when they lead nowhere.
+#[derive(Component, Default, Clone)]
+struct PreviousButton;
+#[derive(Component, Default, Clone)]
+struct NextButton;
 
 #[derive(Component, Default, Clone)]
 struct LayoutSelect;
 
 /// The toggles and checkboxes of the settings, they start unchecked.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum Setting {
+pub enum Setting {
     #[default]
     FadeLegends,
     LayerTrainer,
@@ -89,6 +111,7 @@ enum Setting {
     LockLessons,
     Compact,
     FixWithBackspace,
+    AutoHideToolbar,
 }
 
 #[derive(Component, Default, Clone)]
@@ -141,6 +164,8 @@ struct LessonsOverlay;
 
 #[derive(Component, Default, Clone)]
 struct LessonsHint;
+#[derive(Component, Default, Clone)]
+struct LessonsTitle;
 
 /// The tiles of the lessons, filled when the panel opens.
 #[derive(Component, Default, Clone)]
@@ -167,37 +192,67 @@ impl Panel {
     }
 }
 
-const HELP: &str = "\
-MODES, the first menu
-  Basic course, Adaptability, Velocity, Fluidness: the exercises of Klavaro, real words at the end
-  Layer course: the keys of Lower and Raise row by row    Warm-up: your weak keys, after a pause
-  Finger drill, Left and Right hand finger bounce: one finger, or middle and index in turns
-  Shortcuts & keys: Esc, arrows, Ctrl and Alt shortcuts, Alt+Tab
-  Hanzi (HSK 1-4): write each word with a pen, mouse or finger, then type its pinyin
-    Strokes: the word stroke by stroke, how the brush writes each, its basic strokes
-    Brush (settings): rings where the brush presses, thin ends lift; slow is thick without pressure
+/// The sections of the help, their headings in the color and the weight of [`tokens::HEADING`].
+const HELP: [(&str, &str); 7] = [
+    (
+        "Menus",
+        "\
+The first menu is what you learn: Touch typing or Hanzi. The second one is its exercise or level,
+‹ › go through its lessons; they are grayed out at the ends and before a locked lesson.
+Lessons and Stats show those of the menu picked: the touch typing and the hanzi apart.",
+    ),
+    (
+        "Touch typing",
+        "\
+Basic course, Adaptability, Velocity, Fluidness: the exercises of Klavaro, real words at the end
+Layer course: the keys of Lower and Raise row by row    Warm-up: your weak keys, after a pause
+Finger drill, Left and Right hand finger bounce: one finger, or middle and index in turns
+Shortcuts & keys: Esc, arrows, Ctrl and Alt shortcuts, Alt+Tab",
+    ),
+    (
+        "Hanzi (HSK 1-4)",
+        "\
+Write each word with a pen, mouse or finger, then type its pinyin; each stroke gets its accuracy
+After three misses on a stroke it is written before your eyes: the word goes to the weak words,
+review them in the second menu. Hint shows the stroke too
+Strokes: the word stroke by stroke, how the brush writes each, its basic strokes
+Brush (settings): rings where the brush presses, thin ends lift; slow is thick without pressure",
+    ),
+    (
+        "Toolbar",
+        "\
+Restart  a new text    Lessons  your lessons and levels    Stats  calendar, progress, your keys or words
+Settings  the keyboard (paste or drop a ZMK keymap), theme, locked lessons, zoom, T9, sound
+F11  full screen, the toolbar shows when the pointer goes to the top (or always, in the settings)",
+    ),
+    (
+        "Typing",
+        "\
+Backspace erases the errors, Ctrl+Backspace all of them
+A line without errors clears in green, with one slip in orange
+Zoom: Ctrl and the mouse wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0
+At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill",
+    ),
+    (
+        "Colors",
+        "\
+green the next key, purple shift or hold the key longer (auto shift), amber hold, red backspace
+The stripes of the keys and the hands show the finger of every key, a miss streams out of it",
+    ),
+    (
+        "On-screen keyboard",
+        "\
+Click a key to type it, hold it past the bar under it for the capital (auto shift)
+Lower and Raise: click to show and use their layer, click again to go back, or hold them
+Ctrl, Alt, Win: click them, then the key: they are never sent to your system",
+    ),
+];
 
-TOOLBAR
-  ‹ ›  the lesson, the finger, the hand or the hanzi level    Restart  a new text
-  Lessons  your lessons and levels    Stats  calendar, words per minute, accuracy, your keys
-  Settings  the keyboard (paste or drop a ZMK keymap), dark mode, locked lessons, zoom, T9, sound
+const HELP_FOOTER: &str = "F1 or ? opens this help, Esc or a click closes it. The progress is saved in ~/.config/claudralingo";
 
-TYPING
-  Backspace erases the errors, Ctrl+Backspace all of them
-  A line without errors clears in green, with one slip in orange
-  Zoom: Ctrl and the mouse wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0
-  At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill
-
-COLORS
-  green the next key, purple shift or hold the key longer (auto shift), amber hold, red backspace
-  The stripes of the keys and the hands show the finger of every key, a miss streams out of it
-
-ON-SCREEN KEYBOARD
-  Click a key to type it, hold it past the bar under it for the capital (auto shift)
-  Lower and Raise: click to show and use their layer, click again to go back, or hold them
-  Ctrl, Alt, Win: click them, then the key: they are never sent to your system
-
-F1 or ? opens this help, Esc or a click closes it. The progress is saved in ~/.config/claudralingo";
+/// A section of the help.
+#[derive(Component, Default, Clone)]
+struct HelpSections;
 
 #[derive(Component, Default, Clone)]
 struct SuggestCaption;
@@ -210,8 +265,7 @@ impl Plugin for UiPlugin {
             .init_resource::<PendingKeymap>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
             Update,
             (
-                init_settings,
-                sync_mode_select,
+                (sync_settings, sync_mode_select, remember_typing_mode, enable_arrows, show_toolbar, full_screen),
                 show_mode_views,
                 update_lesson_label,
                 update_live_stats,
@@ -221,6 +275,7 @@ impl Plugin for UiPlugin {
                 fill_lessons.run_if(resource_changed::<Panel>),
                 show_hands,
                 show_hanzi,
+                fill_help,
                 fill_welcome,
                 update_trends,
                 update_actions,
@@ -234,29 +289,48 @@ impl Plugin for UiPlugin {
     }
 }
 
-fn spawn_ui(mut commands: Commands, progress: Res<Progress>) {
+/// The options of the hanzi menu: the HSK levels, then the weak words.
+const HANZI_OPTIONS: [&str; 5] = ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "Weak words"];
+
+/// The option of the hanzi menu of the progress.
+fn hanzi_option(progress: &Progress, data: &crate::hanzi::data::HanziData) -> usize {
+    if progress.hanzi.review {
+        return HANZI_OPTIONS.len() - 1;
+    }
+    data.levels.get(progress.hanzi.level).map_or(0, |l| l.hsk.saturating_sub(1) as usize)
+}
+
+fn spawn_ui(mut commands: Commands, progress: Res<Progress>, data: Res<crate::hanzi::data::HanziData>) {
     commands.spawn(Camera2d);
-    let mode = ExerciseMode::ALL.iter().position(|m| *m == progress.mode);
+    let subject = Subject::ALL.iter().position(|s| *s == progress.mode.subject());
+    let subjects = list_rows_from_strings(Subject::ALL.map(Subject::name), subject);
+    let typing = Subject::Typing.modes();
+    let typing_mode = if progress.mode.subject() == Subject::Typing { progress.mode } else { progress.typing_mode };
+    let exercise = typing.iter().position(|m| *m == typing_mode);
+    let exercises = list_rows_from_strings(typing.iter().map(|m| m.name()), exercise);
+    let books = list_rows_from_strings(HANZI_OPTIONS, Some(hanzi_option(&progress, &data)));
     let layout = LayoutId::ALL.iter().position(|l| *l == progress.layout);
-    let modes = list_rows_from_strings(ExerciseMode::ALL.map(ExerciseMode::name), mode);
     let layouts = list_rows_from_strings(LayoutId::ALL.map(LayoutId::name), layout);
     let background = BackgroundLevel::ALL.iter().position(|b| *b == progress.background);
     let backgrounds = list_rows_from_strings(BackgroundLevel::ALL.map(BackgroundLevel::name), background);
     let theme = ThemeMode::ALL.iter().position(|t| *t == progress.theme);
     let themes = list_rows_from_strings(ThemeMode::ALL.map(ThemeMode::name), theme);
-    commands.spawn_scene(root(modes, layouts, backgrounds, themes));
+    commands.spawn_scene(root([subjects, exercises, books], layouts, backgrounds, themes));
 }
 
 fn root(
-    modes: Box<dyn SceneList>,
+    menus: [Box<dyn SceneList>; 3],
     layouts: Box<dyn SceneList>,
     backgrounds: Box<dyn SceneList>,
     themes: Box<dyn SceneList>,
 ) -> impl Scene {
     bsn! {
+        // The root is a flex item of the viewport: without a minimum height of 0 it grows with
+        // its content, zoomed in the footer went out of the window.
         Node {
             width: percent(100),
             height: percent(100),
+            min_height: px(0),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
@@ -274,7 +348,9 @@ fn root(
             }
             BackgroundRoot
             --
-            // Everything but the overlays scrolls, zoomed in.
+            @toolbar(menus)
+            --
+            // Everything but the toolbar and the overlays scrolls, zoomed in.
             Node {
                 width: percent(100),
                 flex_grow: 1.0,
@@ -289,8 +365,6 @@ fn root(
             WindowScroll
             on(scroll_window)
             Children [
-                @toolbar(modes)
-                --
                 @stats_bar()
                 --
                 // The text, the shortcuts or the results, in the same place.
@@ -385,10 +459,13 @@ fn root(
                 padding: UiRect::axes(px(14), px(5)),
                 margin: UiRect::bottom(px(6)),
                 border_radius: BorderRadius::all(px(8)),
+                max_width: percent(100),
             }
             ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+            ActionsBar
             Children [
                 @label_dim("") ActionsText
+                TextLayout { justify: Justify::Center, linebreak: LineBreak::WordBoundary }
             ]
             --
             @help_overlay()
@@ -406,42 +483,64 @@ fn root(
     }
 }
 
-fn toolbar(modes: Box<dyn SceneList>) -> impl Scene {
+fn toolbar([subjects, exercises, books]: [Box<dyn SceneList>; 3]) -> impl Scene {
     bsn! {
         Node {
             width: percent(100),
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,
             column_gap: px(8),
+            row_gap: px(6),
             padding: px(8),
+            top: px(0),
+            left: px(0),
         }
         ThemeBackgroundColor(feathers_tokens::PANE_HEADER_BG)
+        GlobalZIndex(40)
+        Toolbar
         Children [
-            @label("Claudralingo")
+            @FeathersSelect {
+                @options: subjects,
+            }
+            SubjectSelect
+            Node {
+                min_width: px(130),
+            }
+            on(on_subject_change)
             --
             @FeathersSelect {
-                @options: modes,
+                @options: exercises,
             }
-            ModeSelect
+            TypingSelect
             Node {
-                min_width: px(160),
+                min_width: px(200),
             }
-            on(on_mode_change)
+            on(on_exercise_change)
+            --
+            @FeathersSelect {
+                @options: books,
+            }
+            HanziSelect
+            Node {
+                display: Display::None,
+                min_width: px(110),
+            }
+            on(on_hanzi_change)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("‹") }
             }
+            PreviousButton
             on(previous_lesson)
             --
             @label_dim("") LessonLabel
-            Node {
-                min_width: px(200),
-            }
             --
             @FeathersButton {
                 @caption: bsn! { @caption("›") }
             }
+            NextButton
             on(next_lesson)
             --
             @FeathersButton {
@@ -476,7 +575,7 @@ fn toolbar(modes: Box<dyn SceneList>) -> impl Scene {
 }
 
 /// A checkbox of the settings, with what it does.
-fn setting_checkbox(setting: Setting, text: &'static str) -> impl Scene {
+pub fn setting_checkbox(setting: Setting, text: &'static str) -> impl Scene {
     bsn! {
         @FeathersCheckbox {
             @caption: bsn! { @caption(text) }
@@ -510,9 +609,12 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6))
             on(close_panel)
             --
+            // At a high zoom it scrolls, the header stays.
             @group()
             Node {
-                width: px(520),
+                width: px(560),
+                max_width: percent(96),
+                max_height: percent(94),
             }
             Children [
                 @group_header() Children [ @label("Settings") ]
@@ -522,7 +624,10 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     flex_direction: FlexDirection::Column,
                     row_gap: px(12),
                     padding: px(12),
+                    min_height: px(0),
+                    overflow: Overflow::scroll_y(),
                 }
+                bevy::ui_widgets::ScrollArea
                 Children [
                     Node {
                         flex_direction: FlexDirection::Row,
@@ -568,24 +673,17 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                             @options: themes,
                         }
                         Node {
-                            min_width: px(180),
+                            min_width: px(150),
                         }
                         on(on_theme_change)
-                    ]
-                    --
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: px(12),
-                    }
-                    Children [
-                        @label("Background") Node { min_width: px(110) }
+                        --
+                        @label("Background")
                         --
                         @FeathersSelect {
                             @options: backgrounds,
                         }
                         Node {
-                            min_width: px(180),
+                            min_width: px(110),
                         }
                         on(on_background_change)
                     ]
@@ -602,13 +700,15 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     --
                     @setting_checkbox(Setting::Compact, "Compact, for phones: no keyboard, the finger tips and the layer to hold")
                     --
+                    @setting_checkbox(Setting::AutoHideToolbar, "Hide the toolbar: it shows when the pointer goes to the top (always in full screen, F11)")
+                    --
                     @setting_checkbox(Setting::ReduceMotion, "Reduce motion: no drift, sparks, shakes nor breathing keys")
                     --
                     @setting_checkbox(Setting::LargeText, "Large text to type")
                     --
                     @setting_checkbox(Setting::PinyinKeypad, "Hanzi: type the pinyin on the nine keys of a phone (T9)")
                     --
-                    @setting_checkbox(Setting::Sound, "Hanzi: speak the words")
+                    @setting_checkbox(Setting::Sound, "Hanzi: speak the words (also beside Listen)")
                     --
                     @setting_checkbox(Setting::Brush, "Hanzi: brush, where to press and lift; a pen's pressure or the speed (slow is thick)")
                     --
@@ -680,9 +780,11 @@ fn lessons_overlay() -> impl Scene {
             @group()
             Node {
                 width: px(820),
+                max_width: percent(96),
+                max_height: percent(94),
             }
             Children [
-                @group_header() Children [ @label("Lessons") ]
+                @group_header() Children [ @label("") LessonsTitle ]
                 --
                 @group_body()
                 Node {
@@ -741,14 +843,18 @@ fn fill_lessons(
     grids: Query<Entity, With<LessonsGrid>>,
     hanzi: Res<crate::hanzi::data::HanziData>,
     hanzi_font: Res<crate::hanzi::HanziFont>,
-    mut hints: Query<&mut Text, With<LessonsHint>>,
+    mut hints: Query<&mut Text, (With<LessonsHint>, Without<LessonsTitle>)>,
+    mut titles: Query<&mut Text, With<LessonsTitle>>,
     mut commands: Commands,
 ) {
     if *panel != Panel::Lessons {
         return;
     }
+    for mut title in &mut titles {
+        title.0 = format!("Lessons · {}", progress.mode.subject().name());
+    }
     let hint = if progress.mode == ExerciseMode::Hanzi {
-        "The levels of the hanzi mode, ten words each, green when done. Click a level to practice it."
+        "The levels of the hanzi, ten words each, green when done. Click a level to practice it, the weak words are in the second menu of the toolbar."
     } else {
         "The best and the last accuracy, the times typed: green when the best reached 95%, red below. Click a lesson to practice it again."
     };
@@ -889,6 +995,7 @@ fn fill_hanzi_levels(
                     progress.mode = ExerciseMode::Hanzi;
                     progress.hanzi.level = i;
                     progress.hanzi.word = 0;
+                    progress.hanzi.review = false;
                     progress.save();
                     *panel = Panel::None;
                 })
@@ -930,14 +1037,64 @@ fn help_overlay() -> impl Scene {
         Children [
             @group()
             Node {
-                width: px(820),
+                width: px(860),
+                max_width: percent(96),
+                max_height: percent(94),
             }
             Children [
-                @group_header() Children [ @label("Claudralingo") ]
+                @group_header() Children [ @label("Help") ]
                 --
-                @group_body() Children [ @label(HELP) ]
+                @group_body()
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(4),
+                    min_height: px(0),
+                    overflow: Overflow::scroll_y(),
+                }
+                bevy::ui_widgets::ScrollArea
+                Children [
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
+                    }
+                    HelpSections
+                    --
+                    @label_dim(HELP_FOOTER)
+                    Node { margin: UiRect::top(px(10)) }
+                ]
             ]
         ]
+    }
+}
+
+/// The sections of the help: a heading, bold and in the color of the headings, and its lines.
+fn fill_help(sections: Query<Entity, Added<HelpSections>>, asset_server: Res<AssetServer>, mut commands: Commands) {
+    for root in &sections {
+        let font = |bold: bool, size: f32| TextFont {
+            font: bevy::text::FontSource::Handle(asset_server.load(if bold {
+                bevy::feathers::constants::fonts::BOLD
+            } else {
+                bevy::feathers::constants::fonts::REGULAR
+            })),
+            font_size: FontSize::Px(size),
+            ..default()
+        };
+        for (i, (heading, body)) in HELP.iter().enumerate() {
+            commands.spawn((
+                Text::new(heading.to_uppercase()),
+                font(true, 15.0),
+                ThemeTextColor(tokens::HEADING),
+                Node { margin: UiRect::top(px(if i == 0 { 0.0 } else { 10.0 })), ..default() },
+                ChildOf(root),
+            ));
+            commands.spawn((
+                Text::new(*body),
+                font(false, 14.0),
+                ThemeTextColor(feathers_tokens::TEXT_MAIN),
+                Node { margin: UiRect::left(px(12)), ..default() },
+                ChildOf(root),
+            ));
+        }
     }
 }
 
@@ -1007,15 +1164,31 @@ impl Setting {
             Setting::LockLessons => progress.lock_lessons,
             Setting::Compact => progress.compact,
             Setting::FixWithBackspace => progress.fix_with_backspace,
+            Setting::AutoHideToolbar => progress.auto_hide_toolbar,
         }
     }
 }
 
-/// The toggles and the checkboxes have no initial value prop.
-fn init_settings(settings: Query<(Entity, &SettingControl), Added<SettingControl>>, progress: Res<Progress>, mut commands: Commands) {
-    for (entity, SettingControl(setting)) in &settings {
-        if setting.get(&progress) {
-            commands.entity(entity).insert(Checked);
+/// The toggles and the checkboxes have no initial value prop; a setting may have two of them,
+/// the sound of the hanzi, they follow the progress.
+fn sync_settings(
+    settings: Query<(Entity, &SettingControl, Has<Checked>)>,
+    added: Query<(), Added<SettingControl>>,
+    progress: Res<Progress>,
+    mut commands: Commands,
+) {
+    if !progress.is_changed() && added.is_empty() {
+        return;
+    }
+    for (entity, SettingControl(setting), checked) in &settings {
+        match (setting.get(&progress), checked) {
+            (true, false) => {
+                commands.entity(entity).insert(Checked);
+            }
+            (false, true) => {
+                commands.entity(entity).remove::<Checked>();
+            }
+            _ => {}
         }
     }
 }
@@ -1054,12 +1227,13 @@ fn on_setting_change(
         Setting::LockLessons => progress.lock_lessons = change.value,
         Setting::Compact => progress.compact = change.value,
         Setting::FixWithBackspace => progress.fix_with_backspace = change.value,
+        Setting::AutoHideToolbar => progress.auto_hide_toolbar = change.value,
     }
     progress.save();
     release_focus(&mut focus);
 }
 
-fn on_mode_change(
+fn on_subject_change(
     change: On<ValueChange<Entity>>,
     options: Query<&OptionIndex>,
     mut progress: ResMut<Progress>,
@@ -1067,7 +1241,28 @@ fn on_mode_change(
     mut focus: ResMut<InputFocus>,
 ) {
     if let Ok(option) = options.get(change.value)
-        && let Some(mode) = ExerciseMode::ALL.get(option.0)
+        && let Some(subject) = Subject::ALL.get(option.0)
+        && *subject != progress.mode.subject()
+    {
+        progress.mode = match subject {
+            Subject::Typing => progress.typing_mode,
+            Subject::Hanzi => ExerciseMode::Hanzi,
+        };
+        progress.save();
+        new_exercise.write_default();
+    }
+    release_focus(&mut focus);
+}
+
+fn on_exercise_change(
+    change: On<ValueChange<Entity>>,
+    options: Query<&OptionIndex>,
+    mut progress: ResMut<Progress>,
+    mut new_exercise: MessageWriter<NewExercise>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if let Ok(option) = options.get(change.value)
+        && let Some(mode) = Subject::Typing.modes().get(option.0)
     {
         progress.mode = *mode;
         progress.save();
@@ -1076,11 +1271,54 @@ fn on_mode_change(
     release_focus(&mut focus);
 }
 
-/// The mode also changes from the keyboard and the buttons, the select follows.
+/// An HSK level: its first level not done yet, not past the locked ones; or the weak words.
+#[allow(clippy::too_many_arguments)]
+fn on_hanzi_change(
+    change: On<ValueChange<Entity>>,
+    options: Query<&OptionIndex>,
+    mut progress: ResMut<Progress>,
+    data: Res<crate::hanzi::data::HanziData>,
+    mut practice: ResMut<crate::hanzi::Practice>,
+    mut new_exercise: MessageWriter<NewExercise>,
+    mut focus: ResMut<InputFocus>,
+) {
+    release_focus(&mut focus);
+    let Ok(OptionIndex(option)) = options.get(change.value).copied() else {
+        return;
+    };
+    if option == HANZI_OPTIONS.len() - 1 {
+        if crate::hanzi::start_review(&mut progress, &data) {
+            new_exercise.write_default();
+        } else {
+            practice.message =
+                "No weak words yet: a word becomes weak when one of its strokes is shown, after three misses or with Hint.".into();
+            // The menu goes back to the level.
+            progress.set_changed();
+        }
+        return;
+    }
+    let levels = data.levels_of_hsk(option as u8 + 1);
+    let open = if progress.lock_lessons { hanzi_unlocked(&progress) } else { usize::MAX };
+    if levels.start > open {
+        practice.message = format!("HSK {} opens when HSK {} is done, or without the locked lessons (settings).", option + 1, option);
+        progress.set_changed();
+        return;
+    }
+    let level = levels.clone().find(|l| !progress.hanzi.levels_done.contains_key(l)).unwrap_or(levels.start).min(open);
+    crate::hanzi::go_to_level(&mut practice, &mut progress, &data, level);
+    new_exercise.write_default();
+}
+
+/// The menus follow the progress: the mode also changes from the keyboard and the buttons.
+#[allow(clippy::type_complexity)]
 fn sync_mode_select(
     progress: Res<Progress>,
-    selects: Query<Entity, With<ModeSelect>>,
-    layout_selects: Query<Entity, With<LayoutSelect>>,
+    data: Res<crate::hanzi::data::HanziData>,
+    selects: Query<
+        (Entity, Has<SubjectSelect>, Has<TypingSelect>, Has<HanziSelect>, Has<LayoutSelect>),
+        Or<(With<SubjectSelect>, With<TypingSelect>, With<HanziSelect>, With<LayoutSelect>)>,
+    >,
+    mut nodes: Query<&mut Node, Or<(With<TypingSelect>, With<HanziSelect>)>>,
     children: Query<&Children>,
     rows: Query<(&OptionIndex, Has<Selected>)>,
     mut commands: Commands,
@@ -1088,10 +1326,30 @@ fn sync_mode_select(
     if !progress.is_changed() {
         return;
     }
-    let mode = ExerciseMode::ALL.iter().position(|m| *m == progress.mode);
-    let layout = LayoutId::ALL.iter().position(|l| *l == progress.layout);
-    let selects = selects.iter().map(|s| (s, mode)).chain(layout_selects.iter().map(|s| (s, layout)));
-    for (select, index) in selects {
+    let subject = progress.mode.subject();
+    let typing_mode = if subject == Subject::Typing { progress.mode } else { progress.typing_mode };
+    for (select, is_subject, is_typing, is_hanzi, is_layout) in &selects {
+        let index = if is_subject {
+            Subject::ALL.iter().position(|s| *s == subject)
+        } else if is_typing {
+            Subject::Typing.modes().iter().position(|m| *m == typing_mode)
+        } else if is_hanzi {
+            Some(hanzi_option(&progress, &data))
+        } else if is_layout {
+            LayoutId::ALL.iter().position(|l| *l == progress.layout)
+        } else {
+            continue;
+        };
+        if let Ok(mut node) = nodes.get_mut(select) {
+            let shown = if (is_typing && subject == Subject::Typing) || (is_hanzi && subject == Subject::Hanzi) {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            if node.display != shown {
+                node.display = shown;
+            }
+        }
         for row in children.iter_descendants(select) {
             if let Ok((option, selected)) = rows.get(row) {
                 let wanted = Some(option.0) == index;
@@ -1102,6 +1360,13 @@ fn sync_mode_select(
                 }
             }
         }
+    }
+}
+
+/// The exercise of the touch typing to go back to from the hanzi.
+fn remember_typing_mode(mut progress: ResMut<Progress>) {
+    if progress.is_changed() && progress.mode.subject() == Subject::Typing && progress.typing_mode != progress.mode {
+        progress.typing_mode = progress.mode;
     }
 }
 
@@ -1181,64 +1446,105 @@ fn on_layout_change(
     release_focus(&mut focus);
 }
 
-/// ‹ and › change the finger in the finger drills, the hand in the bounces, the basic lesson
-/// otherwise.
 /// The last hanzi level open with the lessons locked: the ones done and the next one.
 pub fn hanzi_unlocked(progress: &Progress) -> usize {
     progress.hanzi.levels_done.keys().map(|l| l + 1).max().unwrap_or(0).max(progress.hanzi.level)
 }
 
-fn change_lesson(progress: &mut Progress, layout: &crate::layout::Layout, delta: isize) {
+/// Where ‹ and › lead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Basic(usize),
+    Layer(usize),
+    Finger(u8),
+    /// The other hand of the bounces.
+    Mode(ExerciseMode),
+    HanziLevel(usize),
+}
+
+/// ‹ and › change the basic or the layer lesson, the finger of the finger drills, the hand of
+/// the bounces, the level within the HSK level. Nowhere at the ends, before a locked lesson,
+/// in the review of the weak words and in the exercises without lessons.
+fn step(progress: &Progress, layout: &crate::layout::Layout, data: &crate::hanzi::data::HanziData, delta: isize) -> Option<Step> {
     let locked = progress.lock_lessons;
-    if matches!(progress.mode, ExerciseMode::BounceLeft | ExerciseMode::BounceRight) {
-        // The other hand.
-        progress.mode = if progress.mode == ExerciseMode::BounceLeft {
-            ExerciseMode::BounceRight
-        } else {
-            ExerciseMode::BounceLeft
-        };
-    } else if progress.mode == ExerciseMode::Hanzi {
-        let mut level = progress.hanzi.level.saturating_add_signed(delta);
-        if locked {
-            level = level.min(hanzi_unlocked(progress));
+    let default = LayoutProgress::default();
+    let current = progress.layouts.get(progress.layout.key()).unwrap_or(&default);
+    let within = |value: usize, delta: isize, range: std::ops::RangeInclusive<usize>, open: usize| {
+        let next = value.checked_add_signed(delta)?;
+        (range.contains(&next) && (!locked || next <= open) && next != value).then_some(next)
+    };
+    match progress.mode {
+        ExerciseMode::BounceLeft => Some(Step::Mode(ExerciseMode::BounceRight)),
+        ExerciseMode::BounceRight => Some(Step::Mode(ExerciseMode::BounceLeft)),
+        ExerciseMode::Fingers => {
+            let i = FINGERS.iter().position(|f| *f == current.finger).unwrap_or(0);
+            Some(Step::Finger(FINGERS[(i as isize + delta).rem_euclid(FINGERS.len() as isize) as usize]))
         }
-        if level != progress.hanzi.level {
+        ExerciseMode::Basic => within(current.basic_lesson, delta, 1..=N_BASIC_LESSONS, current.basic_unlocked).map(Step::Basic),
+        ExerciseMode::Layers => {
+            let n = crate::course::layer_lessons(layout).len().max(1);
+            within(current.layer_lesson, delta, 1..=n, current.layer_unlocked).map(Step::Layer)
+        }
+        ExerciseMode::Hanzi if !progress.hanzi.review => {
+            let level = progress.hanzi.level.min(data.levels.len() - 1);
+            let book = data.levels_of_hsk(data.levels[level].hsk);
+            within(level, delta, book.start..=book.end - 1, hanzi_unlocked(progress)).map(Step::HanziLevel)
+        }
+        _ => None,
+    }
+}
+
+fn change_lesson(progress: &mut Progress, layout: &crate::layout::Layout, data: &crate::hanzi::data::HanziData, delta: isize) -> bool {
+    let Some(step) = step(progress, layout, data, delta) else {
+        return false;
+    };
+    match step {
+        Step::Basic(lesson) => progress.current().basic_lesson = lesson,
+        Step::Layer(lesson) => progress.current().layer_lesson = lesson,
+        Step::Finger(finger) => progress.current().finger = finger,
+        Step::Mode(mode) => progress.mode = mode,
+        Step::HanziLevel(level) => {
             progress.hanzi.level = level;
             progress.hanzi.word = 0;
         }
-    } else if progress.mode == ExerciseMode::Layers {
-        let n = crate::course::layer_lessons(layout).len().max(1);
-        let current = progress.current();
-        let mut lesson = current.layer_lesson.saturating_add_signed(delta).clamp(1, n);
-        if locked {
-            lesson = lesson.min(current.layer_unlocked);
-        }
-        current.layer_lesson = lesson;
-    } else if progress.mode == ExerciseMode::Fingers {
-        let current = progress.current();
-        let i = FINGERS.iter().position(|f| *f == current.finger).unwrap_or(0);
-        current.finger = FINGERS[(i as isize + delta).rem_euclid(FINGERS.len() as isize) as usize];
-    } else {
-        let current = progress.current();
-        let mut lesson = current.basic_lesson.saturating_add_signed(delta).clamp(1, N_BASIC_LESSONS);
-        if locked {
-            lesson = lesson.min(current.basic_unlocked);
-        }
-        current.basic_lesson = lesson;
-        progress.mode = ExerciseMode::Basic;
     }
     progress.save();
+    true
+}
+
+/// ‹ and › grayed out when they lead nowhere.
+#[allow(clippy::type_complexity)]
+fn enable_arrows(
+    progress: Res<Progress>,
+    layout: Res<ActiveLayout>,
+    data: Res<crate::hanzi::data::HanziData>,
+    buttons: Query<(Entity, Has<PreviousButton>, Has<bevy::ui::InteractionDisabled>), Or<(With<PreviousButton>, With<NextButton>)>>,
+    mut commands: Commands,
+) {
+    if !progress.is_changed() && !layout.is_changed() {
+        return;
+    }
+    for (entity, previous, disabled) in &buttons {
+        let enabled = step(&progress, &layout.0, &data, if previous { -1 } else { 1 }).is_some();
+        if enabled && disabled {
+            commands.entity(entity).remove::<bevy::ui::InteractionDisabled>();
+        } else if !enabled && !disabled {
+            commands.entity(entity).insert(bevy::ui::InteractionDisabled);
+        }
+    }
 }
 
 fn previous_lesson(
     _: On<Activate>,
     mut progress: ResMut<Progress>,
     layout: Res<ActiveLayout>,
+    data: Res<crate::hanzi::data::HanziData>,
     mut new_exercise: MessageWriter<NewExercise>,
     mut focus: ResMut<InputFocus>,
 ) {
-    change_lesson(&mut progress, &layout.0, -1);
-    new_exercise.write_default();
+    if change_lesson(&mut progress, &layout.0, &data, -1) {
+        new_exercise.write_default();
+    }
     release_focus(&mut focus);
 }
 
@@ -1246,11 +1552,13 @@ fn next_lesson(
     _: On<Activate>,
     mut progress: ResMut<Progress>,
     layout: Res<ActiveLayout>,
+    data: Res<crate::hanzi::data::HanziData>,
     mut new_exercise: MessageWriter<NewExercise>,
     mut focus: ResMut<InputFocus>,
 ) {
-    change_lesson(&mut progress, &layout.0, 1);
-    new_exercise.write_default();
+    if change_lesson(&mut progress, &layout.0, &data, 1) {
+        new_exercise.write_default();
+    }
     release_focus(&mut focus);
 }
 
@@ -1627,12 +1935,14 @@ fn update_lesson_label(
     exercise: Res<Exercise>,
     layout: Res<ActiveLayout>,
     progress: Res<Progress>,
+    hanzi: Res<crate::hanzi::data::HanziData>,
     mut labels: Query<&mut Text, With<LessonLabel>>,
 ) {
     if !exercise.is_changed() && !layout.is_changed() && !progress.is_changed() {
         return;
     }
-    let text = match exercise.mode {
+    let mode = if progress.mode == ExerciseMode::Hanzi { ExerciseMode::Hanzi } else { exercise.mode };
+    let text = match mode {
         ExerciseMode::Basic => {
             let chars: Vec<String> = exercise.char_set.iter().copied().map(display_char).collect();
             format!("Lesson {}/{N_BASIC_LESSONS}: {}", exercise.lesson, chars.join(" "))
@@ -1660,12 +1970,76 @@ fn update_lesson_label(
             format!("{} + {} · aLtErNaTe", middle.iter().collect::<String>(), columns.join(" "))
         }
         ExerciseMode::Shortcuts => "Esc, arrows, Ctrl, Alt".into(),
-        ExerciseMode::Hanzi => format!("Hanzi, level {}", progress.hanzi.level + 1),
+        ExerciseMode::Hanzi if progress.hanzi.review => {
+            let n = progress.hanzi.review_words.len();
+            format!("word {}/{n}", (progress.hanzi.review_word + 1).min(n))
+        }
+        ExerciseMode::Hanzi => {
+            let book = hanzi.levels.get(progress.hanzi.level).map(|l| (l.part, l.parts));
+            book.map_or(String::new(), |(part, parts)| format!("Level {part}/{parts}"))
+        }
     };
     for mut label in &mut labels {
         if label.0 != text {
             label.0.clone_from(&text);
         }
+    }
+}
+
+/// The toolbar over the top of the window when it hides: with the setting or in the full
+/// screen, it shows while the pointer is near the top or on it, a panel is open, or a moment
+/// after a touch at the top.
+#[allow(clippy::too_many_arguments)]
+fn show_toolbar(
+    progress: Res<Progress>,
+    panel: Res<Panel>,
+    window: Single<&Window>,
+    scale: Res<UiScale>,
+    touches: Res<Touches>,
+    time: Res<Time<Real>>,
+    hovers: Res<bevy::picking::hover::HoverMap>,
+    parents: Query<&ChildOf>,
+    mut toolbars: Query<(Entity, &mut Node, &ComputedNode), With<Toolbar>>,
+    mut shown_until: Local<f64>,
+) {
+    let full_screen = !matches!(window.mode, bevy::window::WindowMode::Windowed);
+    let hides = progress.auto_hide_toolbar || full_screen;
+    let now = time.elapsed_secs_f64();
+    for (toolbar, mut node, computed) in &mut toolbars {
+        let position = if hides { PositionType::Absolute } else { PositionType::Relative };
+        if node.position_type != position {
+            node.position_type = position;
+        }
+        // The height of the toolbar in the pixels of the window, a strip of 12 when hidden.
+        let height = (computed.size().y * computed.inverse_scale_factor * scale.0).max(12.0);
+        let near_top = window.cursor_position().is_some_and(|p| p.y <= height + 8.0);
+        let touched = touches.iter_just_pressed().any(|t| t.position().y <= 48.0 * scale.0);
+        // On the toolbar or its open menus, they hang below it.
+        let on_it = hovers.values().flat_map(|hovered| hovered.keys()).any(|e| {
+            std::iter::successors(Some(*e), |e| parents.get(*e).ok().map(ChildOf::parent)).any(|e| e == toolbar)
+        });
+        if near_top || on_it || *panel != Panel::None {
+            *shown_until = now + 0.6;
+        }
+        if touched {
+            *shown_until = now + 4.0;
+        }
+        let display = if !hides || now < *shown_until { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+}
+
+/// F11: the full screen, the toolbar hides.
+fn full_screen(keys: Res<ButtonInput<KeyCode>>, mut window: Single<&mut Window>) {
+    if keys.just_pressed(KeyCode::F11) {
+        window.mode = match window.mode {
+            bevy::window::WindowMode::Windowed => {
+                bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current)
+            }
+            _ => bevy::window::WindowMode::Windowed,
+        };
     }
 }
 
@@ -1825,7 +2199,7 @@ fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<D
         ExerciseMode::Hanzi => {
             actions.push("Space listen".into());
             actions.push("Enter next level, once done".into());
-            actions.push("← → levels".into());
+            actions.push("← → levels of the HSK".into());
         }
         ExerciseMode::Shortcuts => {
             actions.push(if drill.finished.is_some() { "Enter another round".into() } else { "Esc, the arrows and the shortcuts are the drill".into() });
@@ -1846,6 +2220,7 @@ fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<D
         }
     }
     actions.push("F1 help".into());
+    actions.push("F11 full screen".into());
     let text = actions.join("   ·   ");
     for mut label in &mut labels {
         if label.0 != text {
@@ -1860,6 +2235,7 @@ fn arrow_lessons(
     mut keys: MessageReader<crate::game::KeyPressed>,
     mut progress: ResMut<Progress>,
     layout: Res<ActiveLayout>,
+    data: Res<crate::hanzi::data::HanziData>,
     panel: Res<Panel>,
     mut new_exercise: MessageWriter<NewExercise>,
 ) {
@@ -1873,9 +2249,40 @@ fn arrow_lessons(
             Some(c) if c == Chord::special(Special::Right) => 1,
             _ => continue,
         };
-        change_lesson(&mut progress, &layout.0, delta);
-        new_exercise.write_default();
+        if change_lesson(&mut progress, &layout.0, &data, delta) {
+            new_exercise.write_default();
+        }
     }
+}
+
+/// The words of the hanzi statistics: the weak ones, the most missed, the best written.
+fn hanzi_rankings(progress: &Progress, data: &crate::hanzi::data::HanziData) -> String {
+    let words = &progress.hanzi.words;
+    if words.is_empty() {
+        return "No word written yet.".into();
+    }
+    let weak: Vec<String> = crate::hanzi::weak_words(progress, data)
+        .iter()
+        .map(|w| format!("{w} ×{}", words.get(w).map_or(0, |s| s.weak)))
+        .collect();
+    let mut missed: Vec<(&String, u32)> = words.iter().filter(|(_, s)| s.misses > 0).map(|(w, s)| (w, s.misses)).collect();
+    missed.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    let missed: Vec<String> = missed.iter().take(10).map(|(w, n)| format!("{w} ×{n}")).collect();
+    let mut best: Vec<(&String, f64)> = words.iter().filter_map(|(w, s)| s.quality().map(|q| (w, q))).collect();
+    best.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let best: Vec<String> = best.iter().take(10).map(|(w, q)| format!("{w} {q:.0}%")).collect();
+    let (sum, n) = words.values().fold((0.0, 0), |(sum, n), s| (sum + s.quality_sum, n + s.quality_n));
+    let glimpses: u32 = words.values().map(|s| s.glimpses).sum();
+    let or_none = |v: Vec<String>, none: &str| if v.is_empty() { none.to_string() } else { v.join("   ") };
+    format!(
+        "Weak words, a stroke was shown: {} (review them in the second menu)\nMost missed: {}\nBest written: {}\n{} words written, {} levels done · the strokes {} accurate · {glimpses} strokes shown",
+        or_none(weak, "none"),
+        or_none(missed, "none"),
+        or_none(best, "not yet"),
+        words.len(),
+        progress.hanzi.levels_done.len(),
+        if n > 0 { format!("{:.0}%", sum / n as f64) } else { "not yet".into() },
+    )
 }
 
 fn update_suggestion(
@@ -1900,8 +2307,16 @@ fn update_suggestion(
 fn update_rankings(
     mut progress: ResMut<Progress>,
     layout: Res<ActiveLayout>,
+    hanzi: Res<crate::hanzi::data::HanziData>,
     mut labels: Query<&mut Text, With<RankingText>>,
 ) {
+    if progress.mode.subject() == Subject::Hanzi {
+        let text = hanzi_rankings(&progress, &hanzi);
+        for mut label in &mut labels {
+            label.0.clone_from(&text);
+        }
+        return;
+    }
     let layout_id = progress.layout;
     let current = progress.bypass_change_detection().current();
     current.update_rankings();
@@ -1949,3 +2364,4 @@ fn update_rankings(
         label.0.clone_from(&text);
     }
 }
+

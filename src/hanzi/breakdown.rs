@@ -80,7 +80,8 @@ pub fn overlay() -> impl Scene {
             @group()
             Node {
                 width: px(900),
-                max_height: vh(92),
+                max_width: percent(96),
+                max_height: percent(94),
             }
             Children [
                 @group_header() Children [ @label("Strokes") ]
@@ -89,6 +90,7 @@ pub fn overlay() -> impl Scene {
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: px(12),
+                    min_height: px(0),
                     overflow: Overflow::scroll_y(),
                 }
                 bevy::ui_widgets::ScrollArea

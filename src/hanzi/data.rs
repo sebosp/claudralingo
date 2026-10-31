@@ -124,6 +124,18 @@ impl HanziData {
     pub fn level_of(&self, word: usize) -> usize {
         self.levels.iter().position(|l| l.words.contains(&word)).unwrap_or(0)
     }
+
+    /// The index of a word, its first one.
+    pub fn index_of(&self, word: &str) -> Option<usize> {
+        self.words.iter().position(|w| w.word == word)
+    }
+
+    /// The levels of an HSK level, their indices.
+    pub fn levels_of_hsk(&self, hsk: u8) -> std::ops::Range<usize> {
+        let first = self.levels.iter().position(|l| l.hsk == hsk).unwrap_or(0);
+        let n = self.levels.iter().filter(|l| l.hsk == hsk).count();
+        first..first + n
+    }
 }
 
 /// The HSK levels cut in parts of [`WORDS_PER_LEVEL`] words, the last part of a level takes the
