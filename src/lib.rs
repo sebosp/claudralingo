@@ -12,9 +12,12 @@ pub mod hanzi;
 pub mod keyboard;
 pub mod klavaro;
 pub mod layout;
+pub mod pasted;
+pub mod penmanship;
 pub mod progress;
 pub mod prompt;
 pub mod shortcuts;
+pub mod sounds;
 pub mod stats;
 pub mod theme;
 pub mod ui;
@@ -39,6 +42,8 @@ impl Plugin for ClaudralingoPlugin {
             zoom::ZoomPlugin,
             hanzi::HanziPlugin,
             stats::StatsPlugin,
+            sounds::SoundsPlugin,
+            penmanship::PenmanshipPlugin,
         ));
     }
 }

@@ -82,6 +82,9 @@ pub struct Tutor {
     pub stop_on_error: bool,
     /// The character at the cursor was missed, it counts as an error once typed right.
     missed_here: bool,
+    /// The character of the slip being fixed: with one error per slip, only it is retouched,
+    /// the keys typed on after it are typed again as new keys.
+    slip_at: Option<usize>,
 }
 
 impl Tutor {
@@ -103,6 +106,7 @@ impl Tutor {
             one_error_per_slip: true,
             stop_on_error: false,
             missed_here: false,
+            slip_at: None,
         }
     }
 
@@ -200,7 +204,13 @@ impl Tutor {
             let touch_time = now - self.last_touch;
             self.touch_times.push(touch_time);
             self.last_touch = now;
-            if self.correcting != 0 {
+            let retouched = if self.one_error_per_slip {
+                self.slip_at == Some(self.cursor)
+            } else {
+                self.correcting != 0
+            };
+            if retouched {
+                self.slip_at = None;
                 self.states[self.cursor] = CharState::Retouched;
                 if !self.one_error_per_slip {
                     self.n_errors += 1;
@@ -218,6 +228,7 @@ impl Tutor {
             let first = self.retro_pos == 1;
             if first {
                 accur.wrong(real_chr, grid);
+                self.slip_at = Some(self.cursor);
                 if self.one_error_per_slip {
                     self.n_errors += 1;
                 }
@@ -359,7 +370,27 @@ mod tests {
         type_str(&mut tutor, "\u{8}\u{8}\u{8}j fj\u{b6}", &mut t, &mut accur);
         assert_eq!(tutor.query, Query::End);
         assert_eq!(tutor.states[1], CharState::Retouched);
+        // The keys typed on after the slip are not retouched: they were typed again as new.
+        assert_eq!(tutor.states[2], CharState::Correct);
+        assert_eq!(tutor.states[3], CharState::Correct);
         assert_eq!(tutor.n_errors, 1);
+    }
+
+    #[test]
+    fn only_the_missed_key_of_a_slip_is_retouched() {
+        let mut tutor = Tutor::new("asdf a\u{b6}\n");
+        let mut accur = Accuracy::default();
+        let mut t = 0.0;
+        type_str(&mut tutor, "qsdf", &mut t, &mut accur);
+        type_str(&mut tutor, "\u{8}\u{8}\u{8}\u{8}asdf a\u{b6}", &mut t, &mut accur);
+        assert_eq!(tutor.query, Query::End);
+        assert_eq!(
+            tutor.states[..4],
+            [CharState::Retouched, CharState::Correct, CharState::Correct, CharState::Correct]
+        );
+        assert_eq!(tutor.n_errors, 1);
+        // The keys after the slip count as hits for their statistics, the missed one does not.
+        assert_eq!(accur.terror[0].ch, 'a');
     }
 
     #[test]

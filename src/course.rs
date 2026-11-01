@@ -1,6 +1,6 @@
 //! The exercises around the basic course: the layer course, the lines of real words made of
 //! the keys learned, and the warm-up on the keys that need it most.
-use crate::klavaro::{KbdGrid, N_BASIC_LESSONS, UPSYM, WORDS, basic::lesson_char_set, rand_below};
+use crate::klavaro::{KbdGrid, N_BASIC_LESSONS, UPSYM, basic::lesson_char_set, rand_below};
 use crate::layout::{Layout, Row};
 use crate::progress::LayoutProgress;
 
@@ -90,38 +90,83 @@ pub fn learned_chars(grid: &KbdGrid, lesson: usize) -> Vec<char> {
     chars
 }
 
-/// The words of the dictionary of Klavaro typed with the characters learned only.
-pub fn words_of(learned: &[char]) -> Vec<&'static str> {
-    WORDS
-        .lines()
-        .map(str::trim)
-        .filter(|w| w.chars().count() >= 2 && w.chars().all(|c| learned.contains(&c)))
-        .collect()
+/// The common English words of SCOWL, by level, the most common first, see
+/// `scripts/prepare_words.py`.
+const DICTIONARY: &str = include_str!("../data/scowl/english.txt");
+
+/// The words of the dictionary typed with the characters learned only and with a key of the
+/// lesson, with their weight: the common words and the words with more keys of the lesson come
+/// up more often.
+pub fn words_of(learned: &[char], lesson: &[char]) -> Vec<(&'static str, u32)> {
+    let mut weight = 1;
+    let mut words = Vec::new();
+    for line in DICTIONARY.lines() {
+        if let Some(level) = line.strip_prefix("= ") {
+            weight = match level.trim() {
+                "10" => 4,
+                "20" => 2,
+                _ => 1,
+            };
+        } else if !line.starts_with('#') && line.chars().count() >= 2 && line.chars().all(|c| learned.contains(&c)) {
+            let focus = line.chars().filter(|c| lesson.contains(c)).count() as u32;
+            if focus > 0 {
+                words.push((line, weight * (1 + focus)));
+            }
+        }
+    }
+    words
 }
 
-/// A few lines of real words made of the characters learned, when there are enough of them,
-/// in the format of the basic lessons.
-pub fn word_lines(learned: &[char], lines: usize) -> Option<String> {
+/// A few lines of real words made of the characters learned with the keys of the lesson, when
+/// there are enough of them,
+/// in the format of the basic lessons. A word does not come back before the ones drawn after
+/// it, unless the keys make only a few words.
+pub fn word_lines(learned: &[char], lesson: &[char], lines: usize) -> Option<String> {
     const MIN_WORDS: usize = 12;
     const LINE_LENGTH: usize = 50;
-    let words = words_of(learned);
+    let words = words_of(learned, lesson);
     if words.len() < MIN_WORDS {
         return None;
     }
+    let total: u32 = words.iter().map(|(_, w)| w).sum();
+    let memory = (words.len() / 2).min(40);
+    let mut recent: Vec<usize> = Vec::new();
     let mut text = String::new();
     for _ in 0..lines {
         let mut line = String::new();
         while line.chars().count() < LINE_LENGTH {
+            let mut pick = 0;
+            for _ in 0..20 {
+                pick = weighted(&words, rand_below(total as usize) as u32);
+                if !recent.contains(&pick) {
+                    break;
+                }
+            }
+            recent.push(pick);
+            if recent.len() > memory {
+                recent.remove(0);
+            }
             if !line.is_empty() {
                 line.push(' ');
             }
-            line.push_str(words[rand_below(words.len())]);
+            line.push_str(words[pick].0);
         }
         text.push_str(&line);
         text.push(UPSYM);
         text.push('\n');
     }
     Some(text)
+}
+
+/// The word at `r` of the weights laid end to end.
+fn weighted(words: &[(&str, u32)], mut r: u32) -> usize {
+    for (i, (_, w)) in words.iter().enumerate() {
+        if r < *w {
+            return i;
+        }
+        r -= w;
+    }
+    words.len() - 1
 }
 
 /// The keys to warm up on: the misses weigh more on the keys not practiced for a while, a
@@ -171,12 +216,41 @@ mod tests {
         let grid = KbdGrid::qwerty_us();
         // The home row: words as "salad", "flask".
         let learned = learned_chars(&grid, 10);
-        assert!(words_of(&learned).iter().all(|w| w.chars().all(|c| learned.contains(&c))));
-        let text = word_lines(&learned, 2).expect("enough words");
+        assert!(words_of(&learned, &learned).iter().all(|(w, _)| w.chars().all(|c| learned.contains(&c))));
+        let text = word_lines(&learned, &learned, 2).expect("enough words");
         assert_eq!(text.matches(UPSYM).count(), 2);
-        // Two keys make no words, nor h j k l ' (lesson 9).
-        assert!(word_lines(&learned_chars(&grid, 1), 2).is_none());
-        assert!(word_lines(&lesson_char_set(9, &grid), 2).is_none());
+        // Two keys make no words.
+        let first = learned_chars(&grid, 1);
+        assert!(word_lines(&first, &first, 2).is_none());
+        // The words of the top row lesson have one of its keys at least, with the home row.
+        let (learned, lesson) = (learned_chars(&grid, 15), lesson_char_set(15, &grid));
+        let words = words_of(&learned, &lesson);
+        assert!(words.iter().all(|(w, _)| w.chars().any(|c| lesson.contains(&c))));
+        assert!(words.iter().any(|(w, _)| *w == "fear"), "{words:?}");
+    }
+
+    #[test]
+    fn the_home_row_makes_many_words() {
+        let grid = KbdGrid::qwerty_us();
+        let home: Vec<char> = "asdfghjkl".chars().collect();
+        let words: Vec<&str> = words_of(&home, &home).into_iter().map(|(w, _)| w).collect();
+        for w in ["ash", "gas", "fad", "flask", "salad", "glass", "half"] {
+            assert!(words.contains(&w), "{w} in {words:?}");
+        }
+        assert!(words.len() > 60, "{}", words.len());
+        // Two lines with no word twice.
+        let text = word_lines(&home, &home, 2).unwrap();
+        let drawn: Vec<&str> = text.split([' ', '\n', UPSYM]).filter(|w| !w.is_empty()).collect();
+        let mut unique = drawn.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), drawn.len(), "{text}");
+        // The words of each basic lesson, with --nocapture.
+        for lesson in 1..=N_BASIC_LESSONS {
+            let set = lesson_char_set(lesson, &grid);
+            let n = words_of(&learned_chars(&grid, lesson), &set).len();
+            println!("{lesson:2} {:>12} {n} words", set.iter().collect::<String>());
+        }
     }
 
     #[test]

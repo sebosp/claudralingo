@@ -16,6 +16,8 @@ bevy = { version = "0.20.0", default-features = false, features = [
     # The words of the hanzi mode, see assets/hanzi.
     "bevy_audio",
     "mp3",
+    # The sounds of the typing, synthesized, see `crate::sounds`.
+    "wav",
     # Paste a keymap of ZMK, see `crate::ui`; the system clipboard on the desktops below.
     "bevy_clipboard",
 ] }

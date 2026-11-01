@@ -107,6 +107,7 @@ pub enum Setting {
     FitWindow,
     PinyinKeypad,
     Sound,
+    TypingSounds,
     Brush,
     LockLessons,
     Compact,
@@ -140,6 +141,14 @@ struct KeymapStatus;
 /// A paste of a keymap waiting for the clipboard.
 #[derive(Resource, Default)]
 struct PendingKeymap(Option<bevy::clipboard::ClipboardRead>);
+
+/// A paste of a text to type waiting for the clipboard, see [`crate::pasted`].
+#[derive(Resource, Default)]
+struct PendingText(Option<bevy::clipboard::ClipboardRead>);
+
+/// Shown in the exercise "Your text".
+#[derive(Component, Default, Clone)]
+struct PasteTextButton;
 
 /// Pushes the hands to the bottom in the compact view.
 #[derive(Component, Default, Clone)]
@@ -262,7 +271,8 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Panel>()
-            .init_resource::<PendingKeymap>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
+            .init_resource::<PendingKeymap>()
+            .init_resource::<PendingText>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
             Update,
             (
                 (sync_settings, sync_mode_select, remember_typing_mode, enable_arrows, show_toolbar, full_screen),
@@ -281,6 +291,7 @@ impl Plugin for UiPlugin {
                 update_actions,
                 arrow_lessons.after(crate::game::GameSystems),
                 import_keymap,
+                import_text,
                 update_rankings.run_if(|p: Res<Progress>, panel: Res<Panel>| p.is_changed() || panel.is_changed()),
                 update_zoom_label.run_if(resource_changed::<UiScale>),
             )
@@ -420,6 +431,8 @@ fn root(
                 --
                 @crate::hanzi::view()
                 --
+                @crate::penmanship::view()
+                --
                 @label("") TrainerHint
                 TypingOnly
                 Node {
@@ -542,6 +555,15 @@ fn toolbar([subjects, exercises, books]: [Box<dyn SceneList>; 3]) -> impl Scene 
             }
             NextButton
             on(next_lesson)
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("Paste text") }
+            }
+            PasteTextButton
+            Node {
+                display: Display::None,
+            }
+            on(paste_text)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("Restart") }
@@ -705,6 +727,8 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                     @setting_checkbox(Setting::ReduceMotion, "Reduce motion: no drift, sparks, shakes nor breathing keys")
                     --
                     @setting_checkbox(Setting::LargeText, "Large text to type")
+                    --
+                    @setting_checkbox(Setting::TypingSounds, "Sounds: a bell on a miss, a chime on a clean line, a falling tone for a key held too long")
                     --
                     @setting_checkbox(Setting::PinyinKeypad, "Hanzi: type the pinyin on the nine keys of a phone (T9)")
                     --
@@ -1160,6 +1184,7 @@ impl Setting {
             Setting::FitWindow => progress.fit_window,
             Setting::PinyinKeypad => progress.pinyin_keypad,
             Setting::Sound => progress.sound,
+            Setting::TypingSounds => progress.typing_sounds,
             Setting::Brush => progress.brush,
             Setting::LockLessons => progress.lock_lessons,
             Setting::Compact => progress.compact,
@@ -1223,6 +1248,7 @@ fn on_setting_change(
         Setting::FitWindow => progress.fit_window = change.value,
         Setting::PinyinKeypad => progress.pinyin_keypad = change.value,
         Setting::Sound => progress.sound = change.value,
+        Setting::TypingSounds => progress.typing_sounds = change.value,
         Setting::Brush => progress.brush = change.value,
         Setting::LockLessons => progress.lock_lessons = change.value,
         Setting::Compact => progress.compact = change.value,
@@ -1247,6 +1273,7 @@ fn on_subject_change(
         progress.mode = match subject {
             Subject::Typing => progress.typing_mode,
             Subject::Hanzi => ExerciseMode::Hanzi,
+            Subject::Penmanship => ExerciseMode::Penmanship,
         };
         progress.save();
         new_exercise.write_default();
@@ -1370,6 +1397,50 @@ fn remember_typing_mode(mut progress: ResMut<Progress>) {
     }
 }
 
+fn paste_text(
+    _: On<Activate>,
+    mut clipboard: ResMut<bevy::clipboard::Clipboard>,
+    mut pending: ResMut<PendingText>,
+    mut focus: ResMut<InputFocus>,
+) {
+    pending.0 = Some(clipboard.fetch_text());
+    release_focus(&mut focus);
+}
+
+/// The text of the clipboard becomes the text of "Your text", from its first part.
+fn import_text(
+    mut pending: ResMut<PendingText>,
+    mut progress: ResMut<Progress>,
+    mut new_exercise: MessageWriter<NewExercise>,
+    mut buttons: Query<&mut Node, With<PasteTextButton>>,
+) {
+    let show = if progress.mode == ExerciseMode::Custom { Display::Flex } else { Display::None };
+    for mut node in &mut buttons {
+        if node.display != show {
+            node.display = show;
+        }
+    }
+    let Some(read) = pending.0.as_mut() else {
+        return;
+    };
+    let Some(result) = read.poll_result() else {
+        return;
+    };
+    pending.0 = None;
+    match result {
+        Ok(text) if !text.trim().is_empty() => {
+            // A book is typed part by part, a few pages are plenty.
+            const MAX_CHARS: usize = 20_000;
+            progress.pasted_text = text.chars().take(MAX_CHARS).collect();
+            progress.pasted_part = 0;
+            progress.save();
+            new_exercise.write_default();
+        }
+        Ok(_) => warn!("the clipboard has no text"),
+        Err(err) => warn!("could not read the clipboard: {err:?}"),
+    }
+}
+
 fn paste_keymap(
     _: On<Activate>,
     mut clipboard: ResMut<bevy::clipboard::Clipboard>,
@@ -1460,6 +1531,8 @@ enum Step {
     /// The other hand of the bounces.
     Mode(ExerciseMode),
     HanziLevel(usize),
+    PastedPart(usize),
+    PenLesson(usize),
 }
 
 /// ‹ and › change the basic or the layer lesson, the finger of the finger drills, the hand of
@@ -1485,6 +1558,15 @@ fn step(progress: &Progress, layout: &crate::layout::Layout, data: &crate::hanzi
             let n = crate::course::layer_lessons(layout).len().max(1);
             within(current.layer_lesson, delta, 1..=n, current.layer_unlocked).map(Step::Layer)
         }
+        ExerciseMode::Penmanship => {
+            let pen = &progress.penmanship;
+            within(pen.lesson, delta, 0..=crate::penmanship::n_lessons() - 1, pen.unlocked).map(Step::PenLesson)
+        }
+        ExerciseMode::Custom => {
+            let lines = crate::pasted::lines(&progress.pasted_text, |c| layout.locate(c).is_some());
+            let n = crate::pasted::parts(&lines);
+            within(progress.pasted_part + 1, delta, 1..=n, n).map(|part| Step::PastedPart(part - 1))
+        }
         ExerciseMode::Hanzi if !progress.hanzi.review => {
             let level = progress.hanzi.level.min(data.levels.len() - 1);
             let book = data.levels_of_hsk(data.levels[level].hsk);
@@ -1507,6 +1589,8 @@ fn change_lesson(progress: &mut Progress, layout: &crate::layout::Layout, data: 
             progress.hanzi.level = level;
             progress.hanzi.word = 0;
         }
+        Step::PastedPart(part) => progress.pasted_part = part,
+        Step::PenLesson(lesson) => progress.penmanship.lesson = lesson,
     }
     progress.save();
     true
@@ -1733,6 +1817,7 @@ fn fill_welcome(
         ExerciseMode::Basic => format!("{}, lesson {}", mode.name(), current.basic_lesson),
         ExerciseMode::Layers => format!("{}, lesson {}", mode.name(), current.layer_lesson),
         ExerciseMode::Hanzi => format!("{}, level {}", mode.name(), progress.hanzi.level + 1),
+        ExerciseMode::Penmanship => format!("{}, {}", mode.name(), crate::penmanship::lesson_name(progress.penmanship.lesson)),
         _ => mode.name().to_string(),
     };
     let last = progress.layouts.values().flat_map(|l| l.sessions.last()).map(|s| s.finished_at).max();
@@ -1847,10 +1932,11 @@ fn show_hanzi(
         return;
     }
     let is_hanzi = progress.mode == ExerciseMode::Hanzi;
+    let drawing = !progress.mode.is_typing() && progress.mode != ExerciseMode::Shortcuts;
     let show = |visible: bool| if visible { Display::Flex } else { Display::None };
     for (mut node, is_keyboard) in &mut typing {
         // The exercise area hides its own parts; the compact view has no keyboard.
-        let display = show(!is_hanzi && !(is_keyboard && progress.compact));
+        let display = show(!drawing && !(is_keyboard && progress.compact));
         if node.display != display {
             node.display = display;
         }
@@ -1872,10 +1958,10 @@ fn show_hands(
         return;
     }
     for mut node in &mut spacers {
-        node.display = if progress.compact && progress.mode != ExerciseMode::Hanzi { Display::Flex } else { Display::None };
+        node.display = if progress.compact && progress.mode.subject() == Subject::Typing { Display::Flex } else { Display::None };
     }
-    // No hands in the hanzi mode, nor in the Matrix.
-    let display = if progress.show_hands && progress.mode != ExerciseMode::Hanzi && progress.theme != ThemeMode::Matrix {
+    // No hands in the hanzi and penmanship modes, nor in the Matrix.
+    let display = if progress.show_hands && progress.mode.subject() == Subject::Typing && progress.theme != ThemeMode::Matrix {
         Display::Flex
     } else {
         Display::None
@@ -1941,7 +2027,7 @@ fn update_lesson_label(
     if !exercise.is_changed() && !layout.is_changed() && !progress.is_changed() {
         return;
     }
-    let mode = if progress.mode == ExerciseMode::Hanzi { ExerciseMode::Hanzi } else { exercise.mode };
+    let mode = if progress.mode.is_typing() { exercise.mode } else { progress.mode };
     let text = match mode {
         ExerciseMode::Basic => {
             let chars: Vec<String> = exercise.char_set.iter().copied().map(display_char).collect();
@@ -1959,6 +2045,11 @@ fn update_lesson_label(
         ExerciseMode::Adaptability => "Random words, your errors first".into(),
         ExerciseMode::Velocity => "Random words of the dictionary".into(),
         ExerciseMode::Fluidness => "Paragraphs, backspace fixes errors".into(),
+        ExerciseMode::Custom if progress.pasted_text.trim().is_empty() => "Copy a text, then Paste text".into(),
+        ExerciseMode::Custom => {
+            let lines = crate::pasted::lines(&progress.pasted_text, |c| layout.0.locate(c).is_some());
+            format!("Your text: part {}/{}", exercise.lesson, crate::pasted::parts(&lines))
+        }
         ExerciseMode::Fingers if exercise.finger == 5 => "Thumbs: Space and Enter".into(),
         ExerciseMode::Fingers => {
             let chars: Vec<String> = layout.0.finger_chars(exercise.finger).iter().map(|(c, _)| c.to_string()).collect();
@@ -1970,6 +2061,10 @@ fn update_lesson_label(
             format!("{} + {} · aLtErNaTe", middle.iter().collect::<String>(), columns.join(" "))
         }
         ExerciseMode::Shortcuts => "Esc, arrows, Ctrl, Alt".into(),
+        ExerciseMode::Penmanship => {
+            let lesson = progress.penmanship.lesson;
+            format!("Lesson {}/{}: {}", lesson + 1, crate::penmanship::n_lessons(), crate::penmanship::lesson_name(lesson))
+        }
         ExerciseMode::Hanzi if progress.hanzi.review => {
             let n = progress.hanzi.review_words.len();
             format!("word {}/{n}", (progress.hanzi.review_word + 1).min(n))
@@ -2200,6 +2295,11 @@ fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<D
             actions.push("Space listen".into());
             actions.push("Enter next level, once done".into());
             actions.push("← → levels of the HSK".into());
+        }
+        ExerciseMode::Penmanship => {
+            actions.push("Write with a pen, a finger or the mouse".into());
+            actions.push("Space show me".into());
+            actions.push("Enter next lesson, once done".into());
         }
         ExerciseMode::Shortcuts => {
             actions.push(if drill.finished.is_some() { "Enter another round".into() } else { "Esc, the arrows and the shortcuts are the drill".into() });

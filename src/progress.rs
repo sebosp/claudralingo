@@ -28,6 +28,8 @@ pub enum ExerciseMode {
     Adaptability,
     Velocity,
     Fluidness,
+    /// A text pasted by the user, see [`crate::pasted`].
+    Custom,
     /// The keys of one finger, up and down its column.
     Fingers,
     /// The middle and the index finger of the left hand in turns, in alternating case.
@@ -37,21 +39,25 @@ pub enum ExerciseMode {
     Shortcuts,
     /// The words of HSK 1 to 4, written with a pen and typed in pinyin, see [`crate::hanzi`].
     Hanzi,
+    /// Spencerian script and Copperplate on their guide sheets, see [`crate::penmanship`].
+    Penmanship,
 }
 
 impl ExerciseMode {
-    pub const ALL: [ExerciseMode; 11] = [
+    pub const ALL: [ExerciseMode; 13] = [
         ExerciseMode::Basic,
         ExerciseMode::Layers,
         ExerciseMode::Review,
         ExerciseMode::Adaptability,
         ExerciseMode::Velocity,
         ExerciseMode::Fluidness,
+        ExerciseMode::Custom,
         ExerciseMode::Fingers,
         ExerciseMode::BounceLeft,
         ExerciseMode::BounceRight,
         ExerciseMode::Shortcuts,
         ExerciseMode::Hanzi,
+        ExerciseMode::Penmanship,
     ];
 
     pub fn name(self) -> &'static str {
@@ -62,21 +68,27 @@ impl ExerciseMode {
             ExerciseMode::Adaptability => "Adaptability",
             ExerciseMode::Velocity => "Velocity",
             ExerciseMode::Fluidness => "Fluidness",
+            ExerciseMode::Custom => "Your text (paste)",
             ExerciseMode::Fingers => "Finger drill",
             ExerciseMode::BounceLeft => "Left hand finger bounce",
             ExerciseMode::BounceRight => "Right hand finger bounce",
             ExerciseMode::Shortcuts => "Shortcuts & keys",
             ExerciseMode::Hanzi => "Hanzi (HSK 1-4)",
+            ExerciseMode::Penmanship => "Spencerian & Copperplate",
         }
     }
 
     /// The exercises with a text typed through the Klavaro tutor.
     pub fn is_typing(self) -> bool {
-        !matches!(self, ExerciseMode::Shortcuts | ExerciseMode::Hanzi)
+        !matches!(self, ExerciseMode::Shortcuts | ExerciseMode::Hanzi | ExerciseMode::Penmanship)
     }
 
     pub fn subject(self) -> Subject {
-        if self == ExerciseMode::Hanzi { Subject::Hanzi } else { Subject::Typing }
+        match self {
+            ExerciseMode::Hanzi => Subject::Hanzi,
+            ExerciseMode::Penmanship => Subject::Penmanship,
+            _ => Subject::Typing,
+        }
     }
 }
 
@@ -87,23 +99,26 @@ pub enum Subject {
     #[default]
     Typing,
     Hanzi,
+    Penmanship,
 }
 
 impl Subject {
-    pub const ALL: [Subject; 2] = [Subject::Typing, Subject::Hanzi];
+    pub const ALL: [Subject; 3] = [Subject::Typing, Subject::Hanzi, Subject::Penmanship];
 
     pub fn name(self) -> &'static str {
         match self {
             Subject::Typing => "Touch typing",
             Subject::Hanzi => "Hanzi",
+            Subject::Penmanship => "Penmanship",
         }
     }
 
     /// The exercises of the second menu.
     pub fn modes(self) -> &'static [ExerciseMode] {
         match self {
-            Subject::Typing => &ExerciseMode::ALL[..10],
-            Subject::Hanzi => &ExerciseMode::ALL[10..],
+            Subject::Typing => &ExerciseMode::ALL[..11],
+            Subject::Hanzi => &ExerciseMode::ALL[11..12],
+            Subject::Penmanship => &ExerciseMode::ALL[12..],
         }
     }
 }
@@ -299,10 +314,13 @@ pub struct Progress {
     pub pinyin_keypad: bool,
     /// The words of the hanzi mode are spoken.
     pub sound: bool,
+    /// A bell on a miss and chimes on the clean lines, see [`crate::sounds`].
+    pub typing_sounds: bool,
     /// The hanzi are written with a brush: the next stroke shows where it presses and lifts,
     /// the ink is thick or thin with the pressure of a pen, else with the speed.
     pub brush: bool,
     pub hanzi: HanziProgress,
+    pub penmanship: crate::penmanship::PenmanshipProgress,
     /// The `.keymap` file of ZMK imported, the layout "My ZMK keymap".
     pub custom_keymap: Option<String>,
     /// A lesson opens when the previous one is passed.
@@ -313,6 +331,9 @@ pub struct Progress {
     pub daily_goal_minutes: u32,
     /// For the phones: no keyboard, the finger tips at the bottom and the layer to hold.
     pub compact: bool,
+    /// The text pasted for the exercise "Your text" and its part being typed, 0 based.
+    pub pasted_text: String,
+    pub pasted_part: usize,
     /// A wrong key moves on and is fixed with Backspace (the motion to learn on a Corne);
     /// off, the cursor waits on the missed key.
     pub fix_with_backspace: bool,
@@ -380,8 +401,12 @@ impl Default for Progress {
             zoom_factor: 1.0,
             pinyin_keypad: false,
             sound: true,
+            typing_sounds: false,
+            pasted_text: String::new(),
+            pasted_part: 0,
             brush: true,
             hanzi: HanziProgress::default(),
+            penmanship: Default::default(),
             custom_keymap: None,
             lock_lessons: true,
             warmup_return: None,

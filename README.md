@@ -11,10 +11,12 @@ A typing tutor made with [Bevy](https://bevyengine.org) 0.20 and its
    ZMK keymap, with layers.
 2. **Chinese hanzi (now, HSK 1 to 4).** The words written stroke by stroke with a pen, a mouse or
    a finger, then typed in pinyin, see [Hanzi](#hanzi).
+3. **Penmanship (now, the small letters).** Spencerian script and Copperplate on their guide
+   sheets, see [Penmanship](#penmanship). What comes next is in `TODO.md`.
 
 ## Menus and toolbar
 
-The first menu of the toolbar is what you learn, Touch typing or Hanzi, more to come; the second
+The first menu of the toolbar is what you learn, Touch typing, Hanzi or Penmanship; the second
 one its exercise (touch typing) or its HSK level and the weak words (hanzi). ‹ › go through the
 lessons of the exercise: the basic or the layer lesson, the finger, the hand of the bounces, the
 level within the HSK level. They are grayed out at the ends, before a locked lesson and in the
@@ -181,16 +183,29 @@ keymap away, see `corne36` in `src/layout.rs`.
 
 - **Layer course** (mode): the keys of each layer row by row (Lower: top row, home row...), then
   the layer whole, then all the layers. A keyboard without layers has its symbols instead.
-- **Real words**: a basic lesson ends with two lines of words of Klavaro's dictionary made of
-  its own keys only, when they make enough words (the home row of lesson 10 does, `h j k l '`
-  of lesson 9 does not).
+- **Real words**: a basic lesson ends with two lines of real words made of the keys learned so
+  far, each with a key new in the lesson (or of the lesson, for the reviews like lesson 10), when
+  they make 12 words or more. The words come from the 39,000 common English words of SCOWL
+  (`data/scowl`), the most common ones more often and no word twice in the two lines: lesson 10
+  has 64 of them (ash, gas, fad, flask, salad...), the top row lessons thousands.
+- **Your text** (mode): Paste text in the toolbar types the text of the clipboard, six lines at a
+  time, ‹ › go through its parts. The typographic quotes and dashes become the keyboard's, the
+  characters the keyboard does not type are left out.
+- **Slips**: with "Fix mistakes with Backspace", only the missed key of a slip counts and turns
+  yellow once fixed; the keys typed on after it are typed again as new keys.
+- **Hints**: in the basic and the layer course, the next key shows after a pause of 2 seconds on
+  the first line, 4 on the second, 8 on the third, then only for the keys not met yet in the
+  exercise: time to look for it in the memory first. A wrong key shows it at once.
+- **Sounds** (setting, off by default): a bell on a miss, a chime on a line without a slip and a
+  chord on a passed exercise, a falling tone for a key held too long by the auto shift, all
+  synthesized (`src/sounds.rs`).
 - **Welcome back**: at the start, continue where the last session stopped (Enter), or warm up
   first on the keys that need it most, their misses weighing more when they were not practiced
   for a while (a spaced repetition), then back to the lesson. The warm-up is also in the menu.
 - **Locked lessons** (setting, on by default): a lesson of the basic and the layer course, and a
   hanzi level, opens when the previous one is passed.
-- **Auto shift**: a capital by a key held too long, or a capital missed, is named above the
-  keyboard and counted in the stats. On the screen, a bar under a pressed key fills to the
+- **Auto shift**: a capital by a key held too long, or a capital missed, is named in a badge over
+  the text (where the eyes are) and above the keyboard, and counted in the stats. On the screen, a bar under a pressed key fills to the
   tapping term of the auto shift.
 - **Encouragements**: a line without errors clears like a row of Tetris with a word ("GREAT!",
   "Are you a bot?"), a line with one slip clears in orange ("Almost!", "So close!"); a miss
@@ -296,6 +311,23 @@ the names of the strokes. A click on a stroke shows it with its brush guide, how
 it, the basic strokes it is made of (横 竖 撇 捺 点 提 钩 折 弯, a click describes one) and the
 characters of the HSK words that have it too, a click breaks one down in turn.
 
+## Penmanship
+
+Spencerian script (52°, the 2:1:2 sheet: the loops three spaces high, the descenders two below)
+and Copperplate (55°, the 3:2:3 sheet), the button under the sheet switches. The sheet has the
+base and head lines, the ascender and descender lines with their dotted halves, and the slant
+lines every half space.
+
+The lessons follow the copybooks: push-pulls, the direct and reversed ovals, the principles 1 to
+3 (straight line, right curve, left curve), i u w, n m v x, o a e c, r s, t d p q, the extended
+loop, h k l b, j y g z f. The letters are built from the principles of the *Theory of
+Spencerian Penmanship* (1874), the model shows the shades of the downstrokes. Each figure is
+written five times: over the model with the next stroke highlighted, over the faded model,
+then three times on the empty sheet; the dot marks where the stroke starts. Three misses on a
+stroke show it being written again (Space or Show me any time). Under the sheet, the slant of
+your downstrokes against the sheet's. A lesson with 75% of its strokes right on the first try
+opens the next one.
+
 ## Progress
 
 Native builds save the progress to `~/.config/claudralingo/progress.json` (`$XDG_CONFIG_HOME` if
@@ -354,3 +386,8 @@ itself on the first start.
   the strokes of cnchar-order (MIT), audio-cmn recordings (CC BY-SA), Noto Sans CJK SC (OFL), the
   stroke matching of Hanzi Writer (MIT), see
   `assets/hanzi/LICENSES.md`; the pinyin dictionary of `inputx-pinyin` (MIT or Apache-2.0).
+- The words of the lessons: SCOWL 2020.12.07 by Kevin Atkinson (permissive, see
+  `data/scowl/Copyright`), filtered by `scripts/prepare_words.py`.
+- The penmanship: the measurements and the letter sequences of the *Theory of Spencerian
+  Penmanship* (1874, public domain); the default proportions as shipbrook.net/guidelines and
+  the IAMPETH sheets give them, no code copied.

@@ -62,10 +62,12 @@ pub fn goal(mode: ExerciseMode) -> f64 {
         ExerciseMode::Adaptability => 98.0,
         ExerciseMode::Velocity => 95.0,
         ExerciseMode::Fluidness => 97.0,
+        ExerciseMode::Custom => 95.0,
         ExerciseMode::Fingers | ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::GOAL_ACCURACY,
         ExerciseMode::Shortcuts => 100.0,
         // The strokes right on the first try, a glimpse counts as two misses.
         ExerciseMode::Hanzi => 95.0,
+        ExerciseMode::Penmanship => 75.0,
     }
 }
 
@@ -209,11 +211,15 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     let mut lesson = lesson;
     let mut char_set = char_set;
     let text = match mode {
-        // The drill, then real words of the keys of the lesson, when they make enough of them:
-        // the lesson shows its keys, the words use only those.
+        // The drill, then real words of the keys learned, each with a key new in the lesson (or
+        // of the lesson, for the reviews), when they make enough of them.
         ExerciseMode::Basic => {
             let mut text = klavaro::basic::draw_lesson(&char_set);
-            if let Some(words) = crate::course::word_lines(&char_set, 2) {
+            let learned = crate::course::learned_chars(grid, lesson);
+            let before = crate::course::learned_chars(grid, lesson - 1);
+            let new: Vec<char> = char_set.iter().copied().filter(|c| !before.contains(c)).collect();
+            let focus = if new.is_empty() { &char_set } else { &new };
+            if let Some(words) = crate::course::word_lines(&learned, focus, 2) {
                 text.push_str(&words);
             }
             text
@@ -239,12 +245,23 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         }
         ExerciseMode::Velocity => klavaro::velocity::draw_random_words(),
         ExerciseMode::Fluidness => klavaro::fluidness::draw_random_paragraphs(),
+        ExerciseMode::Custom => {
+            let lines = crate::pasted::lines(&progress.pasted_text, |c| layout.locate(c).is_some());
+            if lines.is_empty() {
+                format!("copy a text then click paste text to type it here{UPSYM}\n")
+            } else {
+                let parts = crate::pasted::parts(&lines);
+                progress.pasted_part %= parts;
+                lesson = progress.pasted_part + 1;
+                crate::pasted::part(&lines, progress.pasted_part)
+            }
+        }
         ExerciseMode::Fingers => crate::drills::draw_finger_drill(layout, finger),
         ExerciseMode::BounceLeft => crate::drills::draw_bounce(layout, true),
         ExerciseMode::BounceRight => crate::drills::draw_bounce(layout, false),
         // The shortcuts have their own tasks, see `crate::shortcuts`.
         // The shortcuts and the hanzi have their own exercises.
-        ExerciseMode::Shortcuts | ExerciseMode::Hanzi => String::new(),
+        ExerciseMode::Shortcuts | ExerciseMode::Hanzi | ExerciseMode::Penmanship => String::new(),
     };
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     Exercise {
@@ -602,7 +619,12 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         }
         ExerciseMode::Fingers => crate::drills::comment(results.accuracy, exercise.finger),
         ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::bounce_comment(results.accuracy),
-        ExerciseMode::Shortcuts | ExerciseMode::Hanzi => String::new(),
+        ExerciseMode::Custom => {
+            // The next part comes with the next exercise, the last one goes back to the first.
+            progress.pasted_part += 1;
+            "On to the next part of your text.".into()
+        }
+        ExerciseMode::Shortcuts | ExerciseMode::Hanzi | ExerciseMode::Penmanship => String::new(),
     };
     if results.n_errors == 0 {
         exercise.message = format!("Congratulations, not a single error! Well done.\n{}", exercise.message);
