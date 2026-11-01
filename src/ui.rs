@@ -240,7 +240,8 @@ F11  full screen, the toolbar shows when the pointer goes to the top (or always,
 Backspace erases the errors, Ctrl+Backspace all of them
 A line without errors clears in green, with one slip in orange
 Zoom: Ctrl and the mouse wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0
-At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill",
+At the end: Enter for the next exercise, Backspace the previous lesson, Tab the suggested drill
+← → change the lesson before the first key and at the end, the ‹ › buttons at any time",
     ),
     (
         "Colors",
@@ -2305,7 +2306,12 @@ fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<D
             actions.push(if drill.finished.is_some() { "Enter another round".into() } else { "Esc, the arrows and the shortcuts are the drill".into() });
         }
         _ if ended => {
-            actions.push("Enter next exercise".into());
+            let passed = exercise.tutor.results.is_some_and(|r| r.accuracy >= crate::game::goal(exercise.mode));
+            let next_finger = (exercise.mode == ExerciseMode::Fingers && passed).then(|| crate::drills::next_finger(exercise.finger)).flatten();
+            actions.push(match next_finger {
+                Some(finger) => format!("Enter {} drill", finger_name(finger)),
+                None => "Enter next exercise".into(),
+            });
             if exercise.mode == ExerciseMode::Basic {
                 actions.push("Backspace previous lesson".into());
             }
@@ -2314,8 +2320,12 @@ fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<D
             }
             actions.push("← → lessons".into());
         }
-        _ => {
+        _ if exercise.tutor.query == TutorQuery::Start => {
             actions.push("← → lessons".into());
+            actions.push("Ctrl+Backspace clear the errors".into());
+        }
+        _ => {
+            actions.push("‹ › lessons".into());
             actions.push("Ctrl+Backspace clear the errors".into());
         }
     }
@@ -2330,10 +2340,13 @@ fn update_actions(exercise: Res<Exercise>, progress: Res<Progress>, drill: Res<D
 }
 
 /// ← and → change the lesson, the finger, the hand or the hanzi level, not in the shortcuts:
-/// the arrows are part of the drill.
+/// the arrows are part of the drill. Not while an exercise is being typed either: an arrow hit
+/// by mistake (they sit under the letters on the small keyboards) would throw the exercise
+/// away, only the ‹ › buttons change the lesson then.
 fn arrow_lessons(
     mut keys: MessageReader<crate::game::KeyPressed>,
     mut progress: ResMut<Progress>,
+    exercise: Res<Exercise>,
     layout: Res<ActiveLayout>,
     data: Res<crate::hanzi::data::HanziData>,
     panel: Res<Panel>,
@@ -2342,6 +2355,9 @@ fn arrow_lessons(
     use crate::layout::{Chord, Special};
     for key in keys.read() {
         if progress.mode == ExerciseMode::Shortcuts || *panel != Panel::None {
+            continue;
+        }
+        if progress.mode.is_typing() && exercise.tutor.query == TutorQuery::ProcessTouches {
             continue;
         }
         let delta = match key.chord {

@@ -116,7 +116,8 @@ with fireworks, sparks and congratulations.
 
 One drill per finger, ‹ and › pick the finger: the pinky goes up and down its column (q a z), the
 index fingers also move sideways between their two columns, the thumbs drill is short words
-between Space and Enter. At the end of the other exercises, a key missed 3 times or more, or a
+between Space and Enter. A drill passed at 95% goes on to the next finger with Enter, as the
+lessons do, a failed one is repeated. At the end of the other exercises, a key missed 3 times or more, or a
 finger below 92% accuracy over all the exercises, suggests the drill of that finger: Tab or the
 button starts it. The weakest fingers are listed under the keyboard.
 
@@ -220,7 +221,9 @@ instead. At the end, the bar at the top shows the
 words per minute, the accuracy and the fluidness, with ▲ (better), ▼ (worse) or ● (the same)
 against the last time of the same lesson; a new best speed for the lesson is congratulated with
 the gain and the date of the previous record. The keys of the moment (Enter, Backspace, Tab,
-← → for the lessons) are in the bar at the bottom.
+← → for the lessons) are in the bar at the bottom. The arrows change the lesson only before the
+first key and at the end: hit by mistake in the middle of an exercise (they sit under the letters
+on the small keyboards) they would throw it away; the ‹ › buttons work at any time.
 
 ## Themes and the compact view
 

@@ -553,6 +553,7 @@ fn handle_typing(
         });
         if outcome == Outcome::Finished {
             finish(exercise, &mut progress, &layout.0);
+            progress.save();
         }
     }
 }
@@ -589,6 +590,8 @@ fn suggest(exercise: &Exercise, progress: &mut Progress, layout: &Layout) -> Opt
         .then(|| (finger, format!("your weakest finger is the {} at {accuracy:.0}%", finger_name(finger))))
 }
 
+/// The end of an exercise: the comment, the lesson to go on with, the session logged. The
+/// caller saves the progress.
 fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
     let Some(results) = exercise.tutor.results else {
         return;
@@ -680,6 +683,13 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         current.layer_lesson = (exercise.lesson + 1).min(n_layer_lessons);
         current.layer_unlocked = current.layer_unlocked.max(current.layer_lesson);
     }
+    // A finger drill passed: Enter goes on with the next finger, as with the lessons.
+    if mode == ExerciseMode::Fingers
+        && results.accuracy >= goal(mode)
+        && let Some(next) = crate::drills::next_finger(exercise.finger)
+    {
+        current.finger = next;
+    }
     let may_log = mode != ExerciseMode::Fluidness || results.n_touchs >= klavaro::tutor::MIN_CHARS_TO_LOG;
     if may_log {
         current.sessions.push(Session {
@@ -693,7 +703,6 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             quality: None,
         });
     }
-    progress.save();
 }
 
 /// The next key, and the reveal of the next key when the typing stops.
@@ -791,5 +800,76 @@ mod tests {
         assert_eq!(stuck_seconds(ExerciseMode::Basic, &at(text, 11)), Some(STUCK_SECONDS));
         // The other exercises keep the short pause.
         assert_eq!(stuck_seconds(ExerciseMode::Velocity, &at(text, 9)), Some(STUCK_SECONDS));
+    }
+
+    /// Types the text of an exercise as the keys would, Enter at the ends of the lines, with
+    /// `wrong` keys missed once on the first try.
+    fn type_exercise(exercise: &mut Exercise, progress: &mut Progress, grid: &KbdGrid, wrong: usize) -> Outcome {
+        let mut now = 0.0;
+        let mut last = Outcome::Beep;
+        let mut missed = 0;
+        while exercise.tutor.query != Query::End {
+            let Some(c) = exercise.tutor.expected() else { break };
+            now += 0.2;
+            if missed < wrong && c != BACKSPACE && c != UPSYM && c != ' ' {
+                missed += 1;
+                exercise.tutor.process_touch('%', now, &mut progress.current().klavaro, grid);
+                now += 0.2;
+            }
+            last = exercise.tutor.process_touch(c, now, &mut progress.current().klavaro, grid);
+        }
+        last
+    }
+
+    #[test]
+    fn a_passed_lesson_goes_on_to_the_next_one_a_failed_one_repeats() {
+        let mut progress = Progress { mode: ExerciseMode::Basic, ..Progress::default() };
+        let layout = progress.layout.build();
+        let grid = layout.klavaro_grid();
+        for lesson in 1..=3 {
+            let mut exercise = generate(&grid, &layout, &mut progress);
+            assert_eq!(exercise.lesson, lesson);
+            assert_eq!(type_exercise(&mut exercise, &mut progress, &grid, 0), Outcome::Finished);
+            let results = exercise.tutor.results.expect("the results at the end");
+            assert_eq!(results.accuracy, 100.0);
+            finish(&mut exercise, &mut progress, &layout);
+            assert_eq!(progress.current().basic_lesson, lesson + 1, "lesson {lesson} passed");
+            assert_eq!(progress.current().basic_unlocked, lesson + 1);
+        }
+        // A lesson below the goal is typed again.
+        let mut exercise = generate(&grid, &layout, &mut progress);
+        assert_eq!(exercise.lesson, 4);
+        let n = exercise.tutor.text.len();
+        assert_eq!(type_exercise(&mut exercise, &mut progress, &grid, n / 5), Outcome::Finished);
+        assert!(exercise.tutor.results.unwrap().accuracy < klavaro::basic::GOAL_ACCURACY);
+        finish(&mut exercise, &mut progress, &layout);
+        assert_eq!(progress.current().basic_lesson, 4);
+        assert_eq!(progress.current().basic_unlocked, 4);
+        assert_eq!(generate(&grid, &layout, &mut progress).lesson, 4);
+    }
+
+    #[test]
+    fn a_passed_finger_drill_goes_on_to_the_next_finger() {
+        let mut progress = Progress { mode: ExerciseMode::Fingers, ..Progress::default() };
+        progress.current().finger = 8;
+        let layout = progress.layout.build();
+        let grid = layout.klavaro_grid();
+        // Failed: the same finger again.
+        let mut exercise = generate(&grid, &layout, &mut progress);
+        assert_eq!(exercise.finger, 8);
+        let n = exercise.tutor.text.len();
+        assert_eq!(type_exercise(&mut exercise, &mut progress, &grid, n / 5), Outcome::Finished);
+        finish(&mut exercise, &mut progress, &layout);
+        assert_eq!(progress.current().finger, 8);
+        // Passed: the next finger, the last one stays.
+        let mut exercise = generate(&grid, &layout, &mut progress);
+        assert_eq!(type_exercise(&mut exercise, &mut progress, &grid, 0), Outcome::Finished);
+        finish(&mut exercise, &mut progress, &layout);
+        assert_eq!(progress.current().finger, 9);
+        let mut exercise = generate(&grid, &layout, &mut progress);
+        assert_eq!(exercise.finger, 9);
+        assert_eq!(type_exercise(&mut exercise, &mut progress, &grid, 0), Outcome::Finished);
+        finish(&mut exercise, &mut progress, &layout);
+        assert_eq!(progress.current().finger, 9);
     }
 }

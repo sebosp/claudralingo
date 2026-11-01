@@ -13,6 +13,12 @@ const ROW_CHANGE: f64 = 0.75;
 /// The fingers in the order of the drill selector, the thumbs in the middle.
 pub const FINGERS: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+/// The finger after `finger` in the order of the drills, `None` after the last one.
+pub fn next_finger(finger: u8) -> Option<u8> {
+    let i = FINGERS.iter().position(|f| *f == finger)?;
+    FINGERS.get(i + 1).copied()
+}
+
 pub fn draw_finger_drill(layout: &Layout, finger: u8) -> String {
     if finger == 5 {
         return draw_thumbs_drill();
@@ -139,12 +145,14 @@ pub fn bounce_comment(accuracy: f64) -> String {
     }
 }
 
-pub fn comment(accuracy: f64, finger: u8) -> String {
-    let finger = crate::layout::finger_name(finger);
+pub fn comment(accuracy: f64, finger_number: u8) -> String {
+    let finger = crate::layout::finger_name(finger_number);
     if accuracy < GOAL_ACCURACY {
         format!("Keep the other fingers on the home row, only the {finger} moves.\nPress Enter to repeat the drill.")
+    } else if let Some(next) = next_finger(finger_number) {
+        format!("Your {finger} knows its keys!\nPress Enter for the {} drill, or pick another finger with ‹ ›.", crate::layout::finger_name(next))
     } else {
-        format!("Your {finger} knows its keys!\nPress Enter for another drill, or pick another finger with ‹ ›.")
+        format!("Your {finger} knows its keys, every finger has had its drill!\nPress Enter for another drill, or pick another finger with ‹ ›.")
     }
 }
 
@@ -188,6 +196,14 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_fingers_follow_the_order_of_the_drills() {
+        assert_eq!(next_finger(1), Some(2));
+        assert_eq!(next_finger(5), Some(6));
+        assert_eq!(next_finger(9), None);
+        assert_eq!(next_finger(0), None);
     }
 
     #[test]
