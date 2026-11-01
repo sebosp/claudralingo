@@ -260,6 +260,49 @@ pub fn short_date(seconds: u64) -> String {
     if y == this_year { format!("{month} {d}") } else { format!("{month} {d} {y}") }
 }
 
+/// The seconds east of UTC of the local time zone at a moment, 0 when unknown.
+fn local_offset(seconds: u64) -> i64 {
+    use chrono::{Offset, TimeZone};
+    chrono::Local.timestamp_opt(seconds as i64, 0).single().map_or(0, |t| i64::from(t.offset().fix().local_minus_utc()))
+}
+
+/// How long ago a moment was, for the welcome: "just now", "5 minutes ago", "3 hours ago",
+/// "yesterday", "10 days ago"; past 15 days the day and the local time, "Nov 1, 21:38", with
+/// the year in another year.
+pub fn ago(seconds: u64, now: u64) -> String {
+    ago_in(seconds, now, local_offset(seconds), local_offset(now))
+}
+
+fn ago_in(seconds: u64, now: u64, offset: i64, offset_now: i64) -> String {
+    const ABSOLUTE_AFTER_DAYS: u64 = 15;
+    let elapsed = now.saturating_sub(seconds);
+    let plural = |n: u64, unit: &str| if n == 1 { format!("1 {unit} ago") } else { format!("{n} {unit}s ago") };
+    if elapsed < 60 {
+        return "just now".into();
+    }
+    if elapsed < 3600 {
+        return plural(elapsed / 60, "minute");
+    }
+    if elapsed < SECONDS_PER_DAY {
+        return plural(elapsed / 3600, "hour");
+    }
+    // Past a day, the calendar days of the local time.
+    let local_day = |t: u64, offset: i64| day_of(t.saturating_add_signed(offset));
+    let days = local_day(now, offset_now).saturating_sub(local_day(seconds, offset)).max(1);
+    if days == 1 {
+        return "yesterday".into();
+    }
+    if days <= ABSOLUTE_AFTER_DAYS {
+        return plural(days, "day");
+    }
+    let local = seconds.saturating_add_signed(offset);
+    let (y, m, d) = civil(day_of(local));
+    let (this_year, _, _) = civil(day_of(now.saturating_add_signed(offset_now)));
+    let month = &MONTHS[m as usize - 1][..3];
+    let (hour, minute) = ((local % SECONDS_PER_DAY) / 3600, (local % 3600) / 60);
+    if y == this_year { format!("{month} {d}, {hour:02}:{minute:02}") } else { format!("{month} {d} {y}, {hour:02}:{minute:02}") }
+}
+
 const MONTHS: [&str; 12] =
     ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -666,6 +709,31 @@ mod tests {
         // A Thursday: Monday is 0.
         assert_eq!((d + 3) % 7, 3);
         assert_eq!(civil(days_from_civil(2024, 2, 29)), (2024, 2, 29));
+    }
+
+    #[test]
+    fn how_long_ago() {
+        // Nov 1 2026, 21:38 in Paris (UTC+1), the time of a drill.
+        let then = days_from_civil(2026, 11, 1) * SECONDS_PER_DAY + 20 * 3600 + 38 * 60;
+        let paris = 3600;
+        let at = |s: u64| ago_in(then, then + s, paris, paris);
+        assert_eq!(at(30), "just now");
+        assert_eq!(at(60), "1 minute ago");
+        assert_eq!(at(5 * 60 + 20), "5 minutes ago");
+        assert_eq!(at(3 * 3600 + 100), "3 hours ago");
+        // The next morning, 12 hours later: still in hours.
+        assert_eq!(at(12 * 3600), "12 hours ago");
+        // The day after at 22:00: a day and a bit, yesterday.
+        assert_eq!(at(SECONDS_PER_DAY + 22 * 60), "yesterday");
+        // Two days later at 09:00 Paris: 35 hours, but two calendar days.
+        assert_eq!(at(2 * SECONDS_PER_DAY - 12 * 3600 - 38 * 60), "2 days ago");
+        assert_eq!(at(10 * SECONDS_PER_DAY), "10 days ago");
+        assert_eq!(at(15 * SECONDS_PER_DAY), "15 days ago");
+        assert_eq!(at(16 * SECONDS_PER_DAY), "Nov 1, 21:38");
+        // The same moment seen from New York (UTC-5): the local hour of the drill.
+        assert_eq!(ago_in(then, then + 20 * SECONDS_PER_DAY, -5 * 3600, -5 * 3600), "Nov 1, 15:38");
+        // In another year, the year.
+        assert_eq!(at(70 * SECONDS_PER_DAY), "Nov 1 2026, 21:38");
     }
 
     #[test]

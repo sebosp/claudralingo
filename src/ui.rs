@@ -1812,19 +1812,9 @@ fn fill_welcome(
     if *panel != Panel::Welcome {
         return;
     }
-    let mode = progress.mode;
-    let current = progress.current();
-    let place = match mode {
-        ExerciseMode::Basic => format!("{}, lesson {}", mode.name(), current.basic_lesson),
-        ExerciseMode::Layers => format!("{}, lesson {}", mode.name(), current.layer_lesson),
-        ExerciseMode::Hanzi => format!("{}, level {}", mode.name(), progress.hanzi.level + 1),
-        ExerciseMode::Penmanship => format!("{}, {}", mode.name(), crate::penmanship::lesson_name(progress.penmanship.lesson)),
-        _ => mode.name().to_string(),
-    };
-    let last = progress.layouts.values().flat_map(|l| l.sessions.last()).map(|s| s.finished_at).max();
-    let when = last.map(|t| format!(", on {}", crate::stats::short_date(t))).unwrap_or_default();
-    for mut text in &mut texts {
-        text.0 = format!("Last time: {place}{when}.");
+    let text = welcome_text(&mut progress, crate::progress::now_unix_seconds());
+    for mut label in &mut texts {
+        label.0.clone_from(&text);
     }
     let keys = crate::game::warmup_keys(&mut progress);
     let shown: Vec<String> = keys.iter().copied().map(display_char).collect();
@@ -1834,6 +1824,49 @@ fn fill_welcome(
     for mut node in &mut buttons {
         node.display = if keys.is_empty() { Display::None } else { Display::Flex };
     }
+}
+
+/// "Basic course, lesson 10": an exercise with its lesson, finger, level or part, as the
+/// sessions record them (the lessons from 1).
+fn place_name(mode: ExerciseMode, lesson: Option<usize>) -> String {
+    let name = mode.name();
+    match (mode, lesson) {
+        (ExerciseMode::Basic | ExerciseMode::Layers, Some(l)) => format!("{name}, lesson {l}"),
+        (ExerciseMode::Fingers, Some(f)) => format!("{name}, {}", finger_name(f as u8)),
+        (ExerciseMode::Hanzi, Some(l)) => format!("{name}, level {l}"),
+        (ExerciseMode::Penmanship, Some(l)) => format!("{name}, {}", crate::penmanship::lesson_name(l.saturating_sub(1))),
+        (ExerciseMode::Custom, Some(p)) => format!("{name}, part {p}"),
+        _ => name.to_string(),
+    }
+}
+
+/// Where the session stopped: the last exercise with its accuracy against its goal and how
+/// long ago, then the exercise to go on with when it is another one.
+fn welcome_text(progress: &mut Progress, now: u64) -> String {
+    let mode = progress.mode;
+    let current = progress.current();
+    let lesson = match mode {
+        ExerciseMode::Basic => Some(current.basic_lesson),
+        ExerciseMode::Layers => Some(current.layer_lesson),
+        ExerciseMode::Fingers => Some(current.finger as usize),
+        ExerciseMode::Hanzi => Some(progress.hanzi.level + 1),
+        ExerciseMode::Penmanship => Some(progress.penmanship.lesson + 1),
+        ExerciseMode::Custom => Some(progress.pasted_part + 1),
+        _ => None,
+    };
+    let next = place_name(mode, lesson);
+    let Some(last) = progress.layouts.values().flat_map(|l| l.sessions.iter()).max_by_key(|s| s.finished_at) else {
+        return format!("Last time: {next}.");
+    };
+    let place = place_name(last.mode, last.lesson);
+    let goal = crate::game::goal(last.mode);
+    let verdict = if last.accuracy >= goal { "passed".to_string() } else { format!("below the goal of {goal:.0}%") };
+    let when = crate::stats::ago(last.finished_at, now);
+    let mut text = format!("Last time: {place} at {:.1}%, {verdict}, {when}.", last.accuracy);
+    if next != place {
+        text.push_str(&format!("\nUp next: {next}."));
+    }
+    text
 }
 
 fn toggle_help(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
@@ -2481,3 +2514,42 @@ fn update_rankings(
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::progress::Session;
+
+    fn session(mode: ExerciseMode, lesson: Option<usize>, accuracy: f64, finished_at: u64) -> Session {
+        Session { elapsed: 60.0, mode, lesson, accuracy, velocity: 20.0, fluidness: 80.0, finished_at, quality: None }
+    }
+
+    #[test]
+    fn the_welcome_tells_the_last_exercise_and_the_next_one() {
+        let now = 1_793_000_000;
+        let mut progress = Progress { mode: ExerciseMode::Basic, ..Progress::default() };
+        assert_eq!(welcome_text(&mut progress, now), "Last time: Basic course, lesson 1.");
+        // Lesson 10 failed: the same lesson again.
+        progress.current().basic_lesson = 10;
+        progress.current().sessions.push(session(ExerciseMode::Basic, Some(10), 94.4, now - 2 * 3600));
+        assert_eq!(
+            welcome_text(&mut progress, now),
+            "Last time: Basic course, lesson 10 at 94.4%, below the goal of 95%, 2 hours ago."
+        );
+        // Then passed: the next lesson is up.
+        progress.current().basic_lesson = 11;
+        progress.current().sessions.push(session(ExerciseMode::Basic, Some(10), 96.3, now - 20 * 60));
+        assert_eq!(
+            welcome_text(&mut progress, now),
+            "Last time: Basic course, lesson 10 at 96.3%, passed, 20 minutes ago.\nUp next: Basic course, lesson 11."
+        );
+        // A finger drill passed, the next finger up.
+        progress.mode = ExerciseMode::Fingers;
+        progress.current().finger = 9;
+        progress.current().sessions.push(session(ExerciseMode::Fingers, Some(8), 97.5, now - 5 * 60));
+        assert_eq!(
+            welcome_text(&mut progress, now),
+            "Last time: Finger drill, right ring finger at 97.5%, passed, 5 minutes ago.\nUp next: Finger drill, right pinky."
+        );
+    }
+}

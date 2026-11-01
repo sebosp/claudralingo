@@ -200,9 +200,11 @@ keymap away, see `corne36` in `src/layout.rs`.
 - **Sounds** (setting, off by default): a bell on a miss, a chime on a line without a slip and a
   chord on a passed exercise, a falling tone for a key held too long by the auto shift, all
   synthesized (`src/sounds.rs`).
-- **Welcome back**: at the start, continue where the last session stopped (Enter), or warm up
-  first on the keys that need it most, their misses weighing more when they were not practiced
-  for a while (a spaced repetition), then back to the lesson. The warm-up is also in the menu.
+- **Welcome back**: at the start, the last exercise with its accuracy against its goal and how
+  long ago it was (5 minutes ago, yesterday, 10 days ago, past 15 days the day and the time),
+  the exercise up next; continue there (Enter), or warm up first on the keys that need it most,
+  their misses weighing more when they were not practiced for a while (a spaced repetition),
+  then back to the lesson. The warm-up is also in the menu.
 - **Locked lessons** (setting, on by default): a lesson of the basic and the layer course, and a
   hanzi level, opens when the previous one is passed.
 - **Auto shift**: a capital by a key held too long, or a capital missed, is named in a badge over
