@@ -15,6 +15,9 @@ use crate::progress::{ExerciseMode, Progress, Session, now_unix_seconds};
 const FADE_TOUCHES: f32 = 20.0;
 /// Without a touch for this long the next key is shown again.
 const STUCK_SECONDS: f64 = 2.0;
+/// The rows of a course exercise with a pause reveal, twice as late on each row; after them
+/// only the keys not met yet in the exercise are revealed, the others are recalled.
+const PATIENT_ROWS: usize = 3;
 /// A key missed this many times in an exercise suggests the drill of its finger.
 const SUGGEST_MISSES: u32 = 3;
 /// The progress changed since this long is saved, the browser has no exit to save on.
@@ -685,7 +688,8 @@ fn update_coach(
         drill.expected().map(Target::Chord)
     };
     let typing = exercise.tutor.query == Query::ProcessTouches;
-    let stuck = typing && time.elapsed_secs_f64() - coach.last_touch > STUCK_SECONDS;
+    let stuck = typing
+        && stuck_seconds(exercise.mode, &exercise.tutor).is_some_and(|s| time.elapsed_secs_f64() - coach.last_touch > s);
     let always_show = !progress.mode.is_typing();
     // Only the changes, the views follow the changes of the coach.
     if coach.target != target {
@@ -706,6 +710,26 @@ fn update_coach(
     }
 }
 
+/// The pause before the next key is revealed, `None` when the key is left to the memory.
+/// In the courses the first row waits [`STUCK_SECONDS`], each next row twice as long, and the
+/// rows after [`PATIENT_ROWS`] reveal only a key not met yet in the exercise. A wrong key and
+/// the backspace to erase it are always revealed.
+fn stuck_seconds(mode: ExerciseMode, tutor: &Tutor) -> Option<f64> {
+    if !matches!(mode, ExerciseMode::Basic | ExerciseMode::Layers) || tutor.expected() == Some(BACKSPACE) {
+        return Some(STUCK_SECONDS);
+    }
+    let before = &tutor.text[..tutor.cursor.min(tutor.text.len())];
+    let row = before.iter().filter(|c| **c == '\n').count();
+    let met = tutor.current_char().is_some_and(|c| before.contains(&c));
+    if row < PATIENT_ROWS {
+        Some(STUCK_SECONDS * (1 << row) as f64)
+    } else if !met {
+        Some(STUCK_SECONDS)
+    } else {
+        None
+    }
+}
+
 /// Saves the touches of an exercise not finished yet, a closed browser tab keeps them.
 fn autosave(mut progress: ResMut<Progress>, time: Res<Time<Real>>, mut dirty: Local<bool>, mut last: Local<f64>) {
     let now = time.elapsed_secs_f64();
@@ -722,4 +746,28 @@ fn autosave(mut progress: ResMut<Progress>, time: Res<Time<Real>>, mut dirty: Lo
 
 fn save_on_exit(mut progress: ResMut<Progress>) {
     progress.save();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(text: &str, cursor: usize) -> Tutor {
+        let mut tutor = Tutor::new(text);
+        tutor.cursor = cursor;
+        tutor
+    }
+
+    #[test]
+    fn the_reveal_waits_longer_on_each_row_then_only_for_new_keys() {
+        let text = "fj\nfj\nfj\nfjk\n";
+        assert_eq!(stuck_seconds(ExerciseMode::Basic, &at(text, 0)), Some(STUCK_SECONDS));
+        assert_eq!(stuck_seconds(ExerciseMode::Basic, &at(text, 3)), Some(2.0 * STUCK_SECONDS));
+        assert_eq!(stuck_seconds(ExerciseMode::Layers, &at(text, 6)), Some(4.0 * STUCK_SECONDS));
+        // The fourth row: f was met, k was not.
+        assert_eq!(stuck_seconds(ExerciseMode::Basic, &at(text, 9)), None);
+        assert_eq!(stuck_seconds(ExerciseMode::Basic, &at(text, 11)), Some(STUCK_SECONDS));
+        // The other exercises keep the short pause.
+        assert_eq!(stuck_seconds(ExerciseMode::Velocity, &at(text, 9)), Some(STUCK_SECONDS));
+    }
 }
