@@ -96,17 +96,47 @@ pub enum Stage {
     Pinyin,
 }
 
+/// The writes of a word before its pinyin: ten the first time, two fewer each time it comes
+/// back, never under two; a weak word (a stroke had to be shown) gets two more. A learner with
+/// many words behind starts the new ones lower: eight from ten words learned, six from thirty,
+/// five from a hundred.
+pub fn n_writes(stats: Option<&HanziWordStats>, words_learned: usize) -> usize {
+    let first: usize = match words_learned {
+        0..=9 => 10,
+        10..=29 => 8,
+        30..=99 => 6,
+        _ => 5,
+    };
+    let practiced = stats.map_or(0, |s| s.practiced) as usize;
+    let weak = stats.is_some_and(|s| s.weak > 0);
+    let n = first.saturating_sub(2 * practiced).max(2);
+    if weak { (n + 2).min(first) } else { n }
+}
+
+/// The steps of `n` writes: over the outline first, from memory last. Four writes are one of
+/// each step, the extra ones go to the tracing first, then to the memory, then to the
+/// filling in: ten writes are 3 traced, 3 faded, 2 filled in, 2 from memory. Three writes
+/// skip the faded outline, two trace nothing.
+pub fn plan(n: usize) -> Vec<Stage> {
+    let counts: [usize; 4] = match n {
+        0..=2 => [0, 0, 1, 1],
+        3 => [1, 0, 1, 1],
+        _ => {
+            let mut counts = [1, 1, 1, 1];
+            for extra in 0..n - 4 {
+                counts[[0, 1, 3, 2][extra % 4]] += 1;
+            }
+            counts
+        }
+    };
+    [Stage::Trace, Stage::Faded, Stage::Partial, Stage::Memory]
+        .iter()
+        .zip(counts)
+        .flat_map(|(stage, count)| std::iter::repeat_n(*stage, count))
+        .collect()
+}
+
 impl Stage {
-    const ALL: [Stage; 5] = [Stage::Trace, Stage::Faded, Stage::Partial, Stage::Memory, Stage::Pinyin];
-
-    fn number(self) -> usize {
-        Stage::ALL.iter().position(|s| *s == self).unwrap_or(0) + 1
-    }
-
-    fn next(self) -> Option<Stage> {
-        Stage::ALL.get(self.number()).copied()
-    }
-
     fn instructions(self) -> &'static str {
         match self {
             Stage::Trace => "trace the strokes in order, over the outline",
@@ -124,6 +154,11 @@ pub struct Practice {
     /// The index of the word in [`HanziData::words`].
     pub word: usize,
     pub stage: Stage,
+    /// The writes of the word, see [`plan`], and the one being written; after them the pinyin.
+    plan: Vec<Stage>,
+    step: usize,
+    /// Which strokes are taken out in the partial writes, the other half on each next one.
+    parity: usize,
     /// The character of the word being written.
     pub char_index: usize,
     /// The next stroke of the character.
@@ -553,10 +588,15 @@ fn taken_out(stroke: usize, n_strokes: usize, word: usize) -> bool {
 }
 
 impl Practice {
-    fn begin(&mut self, word: usize) {
+    fn begin(&mut self, word: usize, plan: Vec<Stage>, data: &HanziData) {
         let reviewing = self.reviewing;
-        *self = Practice { word, reviewing, dirty: true, started: true, begun: crate::progress::now_unix_seconds(), ..default() };
-        self.message = "A new word: listen, then trace its strokes.".into();
+        let stage = plan.first().copied().unwrap_or(Stage::Pinyin);
+        *self = Practice { word, reviewing, plan, dirty: true, started: true, begun: crate::progress::now_unix_seconds(), ..default() };
+        self.start_stage(stage, data);
+        self.message = match self.plan.len() {
+            n if n >= 8 => format!("A new word: listen, then trace its strokes. {n} writes, then its pinyin."),
+            n => format!("Listen, then write it: {n} writes, then its pinyin."),
+        };
     }
 
     /// Shows the next stroke being written. A penalty, once per stroke: the word becomes weak.
@@ -584,12 +624,15 @@ impl Practice {
             return;
         };
         let n = glyph.medians.len();
-        while self.stage == Stage::Partial && self.stroke < n && !taken_out(self.stroke, n, self.word) {
+        while self.stage == Stage::Partial && self.stroke < n && !taken_out(self.stroke, n, self.word + self.parity) {
             self.stroke += 1;
         }
     }
 
     fn start_stage(&mut self, stage: Stage, data: &HanziData) {
+        if stage == Stage::Partial {
+            self.parity += 1;
+        }
         self.stage = stage;
         self.char_index = 0;
         self.stroke = 0;
@@ -606,7 +649,7 @@ impl Practice {
     fn looks(&self, n: usize, motion: bool) -> Vec<Look> {
         (0..n)
             .map(|i| {
-                let given = self.stage == Stage::Partial && !taken_out(i, n, self.word);
+                let given = self.stage == Stage::Partial && !taken_out(i, n, self.word + self.parity);
                 if i < self.stroke || given {
                     return Look::Done;
                 }
@@ -643,7 +686,8 @@ fn start_word(
         return;
     }
     practice.reviewing = reviewing;
-    practice.begin(word);
+    let plan = plan_for(&progress, &data, word);
+    practice.begin(word, plan, &data);
     speaker.say(&data.words[word].word);
 }
 
@@ -739,9 +783,17 @@ fn show_hint(_: On<Activate>, mut practice: ResMut<Practice>, mut focus: ResMut<
     focus.clear();
 }
 
-fn restart_word(_: On<Activate>, mut practice: ResMut<Practice>, data: Res<HanziData>, mut speaker: ResMut<Speaker>, mut focus: ResMut<InputFocus>) {
+fn restart_word(
+    _: On<Activate>,
+    mut practice: ResMut<Practice>,
+    progress: Res<Progress>,
+    data: Res<HanziData>,
+    mut speaker: ResMut<Speaker>,
+    mut focus: ResMut<InputFocus>,
+) {
     let word = practice.word;
-    practice.begin(word);
+    let plan = plan_for(&progress, &data, word);
+    practice.begin(word, plan, &data);
     speaker.say(&data.words[word].word);
     focus.clear();
 }
@@ -915,7 +967,7 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
             practice.message = match outcome {
                 Outcome::Backwards => "The right stroke, drawn backwards: start at its other end.".to_string(),
                 Outcome::OtherStroke(other)
-                    if !(practice.stage == Stage::Partial && !taken_out(other, n, practice.word)) =>
+                    if !(practice.stage == Stage::Partial && !taken_out(other, n, practice.word + practice.parity)) =>
                 {
                     format!("That is stroke {}, stroke {} comes first: the order matters.", other + 1, stroke + 1)
                 }
@@ -943,15 +995,23 @@ fn next_char(practice: &mut Practice, data: &HanziData, speaker: &mut Speaker) {
         practice.message = format!("{} misses: once more, slowly.", MISSES_TO_REPEAT);
         return;
     }
-    let next = stage.next().unwrap_or(Stage::Pinyin);
+    practice.step += 1;
+    let next = practice.plan.get(practice.step).copied().unwrap_or(Stage::Pinyin);
     practice.start_stage(next, data);
     practice.message = match next {
         Stage::Pinyin => "Now the pinyin: type it and pick the word.".into(),
         _ => "Well done.".into(),
     };
-    if next == Stage::Memory {
+    // The word is said again when the writes from memory start.
+    if next == Stage::Memory && stage != Stage::Memory {
         speaker.say(&practice.word(data).word);
     }
+}
+
+/// The writes of a word for a learner: its own history and the words learned so far.
+fn plan_for(progress: &Progress, data: &HanziData, word: usize) -> Vec<Stage> {
+    let learned = progress.hanzi.words.values().filter(|s| s.practiced > 0).count();
+    plan(n_writes(progress.hanzi.words.get(&data.words[word].word), learned))
 }
 
 /// The keys: the pinyin in its step, Enter for the next level, Space to listen.
@@ -1062,7 +1122,6 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
         stats.pinyin_misses += 1;
         return;
     }
-    speaker.say(&word.word);
     let stats: &mut HanziWordStats = progress.hanzi.words.entry(word.word.clone()).or_default();
     stats.practiced += 1;
     stats.strokes += practice.word_strokes;
@@ -1104,11 +1163,15 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
         hanzi.review_word += 1;
         if let Some(next) = hanzi.review_words.get(hanzi.review_word).and_then(|w| data.index_of(w)) {
             progress.save();
-            practice.begin(next);
+            let plan = plan_for(progress, data, next);
+            practice.begin(next, plan, data);
             practice.message = format!("{learned}. The next weak word.");
+            // The word on the screen is the one heard: the new one, not the one just finished.
+            speaker.say(&data.words[next].word);
         } else {
             let n = hanzi.review_words.len();
             progress.save();
+            speaker.say(&word.word);
             practice.level_done = true;
             practice.candidates.clear();
             practice.input.clear();
@@ -1123,14 +1186,17 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
         progress.hanzi.word = practice.word + 1 - range.start;
         progress.save();
         let next = practice.word + 1;
-        practice.begin(next);
+        let plan = plan_for(progress, data, next);
+        practice.begin(next, plan, data);
         practice.message = format!("{learned}. The next word.");
-        // The word just picked is spoken first, the next one with Listen.
+        // The word on the screen is the one heard: the new one, not the one just finished.
+        speaker.say(&data.words[next].word);
     } else {
         let misses: u32 = range.clone().filter_map(|w| progress.hanzi.words.get(&data.words[w].word)).map(|s| s.misses).sum();
         progress.hanzi.levels_done.insert(level, misses);
         progress.hanzi.word = range.len() - 1;
         progress.save();
+        speaker.say(&word.word);
         practice.level_done = true;
         practice.candidates.clear();
         practice.input.clear();
@@ -1341,9 +1407,13 @@ fn update_view(
     let stage = if practice.level_done {
         format!("{}: done", place(&progress, &data, &practice, false))
     } else {
+        let step = if practice.stage == Stage::Pinyin {
+            "Last step".to_string()
+        } else {
+            format!("Write {} of {}", (practice.step + 1).min(practice.plan.len()), practice.plan.len())
+        };
         format!(
-            "Step {} of 5: {}{}",
-            practice.stage.number(),
+            "{step}: {}{}",
             practice.stage.instructions(),
             if n_chars > 1 && !pinyin_step {
                 format!(" · character {} of {n_chars}", (practice.char_index + 1).min(n_chars))
@@ -1605,7 +1675,7 @@ mod tests {
         let mut speaker = Speaker::default();
         // 人: two strokes, drawn on their medians.
         let word = data.words.iter().position(|w| w.word == "人").expect("人");
-        practice.begin(word);
+        practice.begin(word, plan(4), &data);
         let glyph = data.glyph('人').expect("人").clone();
         let draw = |practice: &mut Practice, speaker: &mut Speaker, stroke: usize| {
             practice.ink = glyph.medians[stroke].iter().map(|p| render::to_pixels(*p)).collect();
@@ -1633,13 +1703,69 @@ mod tests {
     }
 
     #[test]
+    fn the_writes_taper_as_the_word_and_the_learner_progress() {
+        let stats = |practiced, weak| HanziWordStats { practiced, weak, ..default() };
+        assert_eq!(n_writes(None, 0), 10);
+        assert_eq!(n_writes(Some(&stats(1, 0)), 3), 8);
+        assert_eq!(n_writes(Some(&stats(3, 0)), 3), 4);
+        assert_eq!(n_writes(Some(&stats(6, 0)), 3), 2);
+        // A weak word gets two more, never above the first time.
+        assert_eq!(n_writes(Some(&stats(3, 2)), 3), 6);
+        assert_eq!(n_writes(Some(&stats(0, 2)), 3), 10);
+        // The learner with words behind.
+        assert_eq!(n_writes(None, 10), 8);
+        assert_eq!(n_writes(None, 30), 6);
+        assert_eq!(n_writes(None, 200), 5);
+        assert_eq!(n_writes(Some(&stats(2, 0)), 200), 2);
+        // The plans: tracing first, memory last.
+        use Stage::*;
+        assert_eq!(plan(10), vec![Trace, Trace, Trace, Faded, Faded, Faded, Partial, Partial, Memory, Memory]);
+        assert_eq!(plan(5), vec![Trace, Trace, Faded, Partial, Memory]);
+        assert_eq!(plan(4), vec![Trace, Faded, Partial, Memory]);
+        assert_eq!(plan(3), vec![Trace, Partial, Memory]);
+        assert_eq!(plan(2), vec![Partial, Memory]);
+        for n in 2..=12 {
+            assert_eq!(plan(n).len(), n.max(2));
+        }
+    }
+
+    #[test]
+    fn two_partial_writes_take_out_the_other_strokes() {
+        let data = HanziData::load();
+        let mut practice = Practice::default();
+        let word = data.index_of("人").expect("人");
+        practice.begin(word, vec![Stage::Partial, Stage::Partial], &data);
+        let first = practice.stroke;
+        practice.start_stage(Stage::Partial, &data);
+        assert_ne!(practice.stroke, first);
+    }
+
+    #[test]
+    fn the_next_word_is_the_one_said() {
+        let data = HanziData::load();
+        let mut progress = Progress::default();
+        let mut practice = Practice::default();
+        let mut speaker = Speaker::default();
+        let mut ime = InputMethod(None);
+        let word = data.levels[0].words.start;
+        practice.begin(word, plan(2), &data);
+        practice.start_stage(Stage::Pinyin, &data);
+        practice.input = data::toneless(&data.words[word].pinyin).replace(' ', "");
+        refresh_candidates(&mut practice, &data, &mut ime, false);
+        let i = practice.candidates.iter().position(|c| c.word == data.words[word].word).expect("the word among the candidates");
+        pick_candidate(&mut practice, &mut progress, &data, &mut speaker, i);
+        assert_eq!(practice.word, word + 1);
+        assert_eq!(speaker.pending.as_deref(), Some(data.words[word + 1].word.as_str()));
+    }
+
+    #[test]
     fn a_glimpse_makes_the_word_weak() {
         let data = HanziData::load();
         let mut progress = Progress::default();
         let mut practice = Practice::default();
         let mut speaker = Speaker::default();
         let word = data.index_of("人").expect("人");
-        practice.begin(word);
+        practice.begin(word, plan(4), &data);
         // Three scribbles on the first stroke: it is shown, once.
         for _ in 0..MISSES_BEFORE_GLIMPSE + 1 {
             practice.ink = vec![Vec2::new(30.0, 470.0), Vec2::new(60.0, 480.0), Vec2::new(40.0, 500.0)];
@@ -1669,7 +1795,7 @@ mod tests {
         // The review: the word again, then back to the level; written without help, less weak.
         assert!(start_review(&mut progress, &data));
         assert_eq!(target_word(&progress, &data), (word, true));
-        practice.begin(word);
+        practice.begin(word, plan(4), &data);
         practice.stage = Stage::Pinyin;
         practice.candidates = vec![Candidate { word: "人".into(), pinyin: "rén".into() }];
         pick_candidate(&mut practice, &mut progress, &data, &mut speaker, 0);

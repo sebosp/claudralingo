@@ -397,24 +397,26 @@ fn letter(c: char) -> Figure {
 }
 
 /// A row of push-pulls: straight lines up and down the main slant, retraced.
+/// The push-pull: from the base up the slant to the head line and back down the same line, one
+/// movement.
 fn push_pulls() -> Figure {
-    let strokes = (0..5)
+    let strokes = (0..6)
         .map(|i| {
             let x = i as f32 * 0.45;
-            Pen::at(x, 0.0).line(x, 1.0).line(x, 0.0).line(x, 1.0).line(x, 0.0).done()
+            Pen::at(x, 0.0).line(x, 1.0).line(x, 0.0).done()
         })
         .collect();
-    figure("push-pulls", "up and down the slant, retracing the line, an even count of 1-2", strokes)
+    figure("push-pulls", "from the dot, up the slant to the head line and back down the same line, one movement · 1-2", strokes)
 }
 
-/// Ovals one space wide and two high, twice around: counterclockwise, the direct oval of the
-/// capitals O E D C, or clockwise, the reversed oval.
+/// Ovals one space wide and two high, once around from the top: counterclockwise, the direct
+/// oval of the capitals O E D C, or clockwise, the reversed oval.
 fn ovals(direct: bool) -> Figure {
     let strokes = (0..3)
         .map(|i| {
             let cx = i as f32 * 1.25 + 0.5;
-            let turns = 2.0;
-            let n = 64;
+            let turns = 1.0;
+            let n = 40;
             let points = (0..=n)
                 .map(|k| {
                     let t = k as f32 / n as f32 * turns * std::f32::consts::TAU;
@@ -427,9 +429,9 @@ fn ovals(direct: bool) -> Figure {
         })
         .collect();
     if direct {
-        figure("direct ovals", "from the top to the left and around, twice, counterclockwise", strokes)
+        figure("direct ovals", "from the dot at the top, down the left side and around back to the top · counterclockwise", strokes)
     } else {
-        figure("reversed ovals", "from the top to the right and around, twice, clockwise", strokes)
+        figure("reversed ovals", "from the dot at the top, down the right side and around back to the top · clockwise", strokes)
     }
 }
 

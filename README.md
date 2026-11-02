@@ -274,13 +274,19 @@ HSK level, and the weak, the most missed and the best written words. The days ar
 
 The words of HSK 2.0 levels 1 to 4 (the lists of hsk.academy, 1193 words, the most frequent
 first), in levels of ten words: HSK 1 is 15 levels, HSK 2 15, HSK 3 30 and HSK 4 61. One word at a
-time, in five steps:
+time, written several times, then its pinyin:
 
 1. trace the strokes in order over the whole outline, the next stroke highlighted,
 2. over a faded outline,
-3. fill in the strokes taken out of the character,
+3. fill in the strokes taken out of the character (the other half on the next time),
 4. on the empty grid, from memory,
 5. type its pinyin, letters or the nine keys of a phone (T9, in the settings), and pick the word.
+
+A new word is written ten times (3 traced, 3 over the faded outline, 2 filled in, 2 from
+memory), two fewer each time it comes back, never under two (filled in, then from memory); a
+weak word, one that had a stroke shown, gets two more. As the words learned grow the new ones
+start lower: eight writes from ten words, six from thirty, five from a hundred. The word on the
+screen is the one spoken: the next word is said when it comes up.
 
 A stroke is compared with the strokes of the character as Hanzi Writer does (a port of its
 matcher): its distance, start and end, direction, shape (Fréchet distance) and length. A stroke
@@ -328,10 +334,14 @@ The lessons follow the copybooks: push-pulls, the direct and reversed ovals, the
 loop, h k l b, j y g z f. The letters are built from the principles of the *Theory of
 Spencerian Penmanship* (1874), the model shows the shades of the downstrokes. Each figure is
 written five times: over the model with the next stroke highlighted, over the faded model,
-then three times on the empty sheet; the dot marks where the stroke starts. Three misses on a
-stroke show it being written again (Space or Show me any time). Under the sheet, the slant of
-your downstrokes against the sheet's. A lesson with 75% of its strokes right on the first try
-opens the next one.
+then three times on the empty sheet; the dot marks where the stroke starts. On the first write
+each stroke is shown being written before it is asked; a stroke is one movement from the dot to
+the end of the model, without lifting the pen (a push-pull goes up the slant and back down the
+same line, an oval once around from the top). A miss says what went wrong: the start, the end,
+too short, the other way round, the shape. Three misses on a stroke show it being written again
+(Space or Show me any time): the stroke then no longer counts as a first try. Under the sheet,
+the slant of your downstrokes against the sheet's. A lesson with 75% of its strokes right on the
+first try opens the next one.
 
 ## Progress
 

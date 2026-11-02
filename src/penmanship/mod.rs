@@ -5,6 +5,10 @@
 //! sheet. The strokes are compared with the model as the hanzi strokes are, see
 //! [`crate::hanzi::matcher`], and the slant of the downstrokes is measured against the sheet.
 //!
+//! The first write of a figure shows each stroke being written before it is asked, a miss says
+//! what went wrong (the start, the end, the length, the shape); a stroke shown after misses or
+//! on request takes the first try away.
+//!
 //! The model shows the shades of the downstrokes; the ink of the pen follows its pressure later,
 //! when the pens are read on Wayland, see TODO.md.
 pub mod letters;
@@ -44,6 +48,21 @@ const GLIMPSE_SECONDS: f32 = 2.2;
 const WRONG_SECONDS: f32 = 0.9;
 /// The share of the strokes right on the first try to open the next lesson.
 const GOAL: f64 = 75.0;
+/// The strokes are compared scaled up: the matcher's distances are those of a hanzi filling
+/// its 1024 box, a letter is an x-height of 130 px. At 2.5 the start and the end must be
+/// within about one x-height of the model's, the stroke on average within three quarters.
+const MATCH_SCALE: f32 = 2.5;
+/// The leniency of the matcher over the model and on the empty sheet: the figures are long
+/// strokes written in one movement, looser than the hanzi strokes (1.0) on the shape; the
+/// models scaled by 15%, squeezed, moved 40 px and jittered 14 px all pass, see the
+/// calibration test.
+const LENIENCY: f32 = 1.4;
+const LENIENCY_BLANK: f32 = 1.5;
+
+/// The points in the coordinates of the matcher.
+fn to_match(points: &[Vec2]) -> Vec<Vec2> {
+    points.iter().map(|p| *p * MATCH_SCALE).collect()
+}
 const CANVAS_MAX: f32 = 900.0;
 
 /// The progress of the penmanship, whatever the keyboard.
@@ -90,8 +109,11 @@ struct Practice {
     /// The strokes accepted of the current write, in pixels.
     written: Vec<Vec<Vec2>>,
     wrong: Option<(Vec<Vec2>, f32)>,
-    /// The stroke shown being written after the misses, its time left.
+    /// The stroke shown being written, its time left: the demonstration of the first write,
+    /// or the help after the misses and on request.
     glimpse: f32,
+    /// The stroke was shown on request or after misses: not a first try.
+    helped: bool,
     /// The strokes of the lesson, right on the first try.
     first_try: u32,
     total: u32,
@@ -270,15 +292,25 @@ impl Practice {
         self.write = 0;
         self.slants.clear();
         self.begin_write();
+        self.message = "Watch the stroke, then write it yourself from the dot, in one movement. Space shows it again.".into();
     }
 
     fn begin_write(&mut self) {
         self.stroke = 0;
         self.misses = 0;
+        self.helped = false;
         self.written.clear();
         self.ink.clear();
         self.glimpse = 0.0;
         self.dirty = true;
+        self.demonstrate();
+    }
+
+    /// The first write shows each stroke being written before it is asked.
+    fn demonstrate(&mut self) {
+        if self.stage() == Stage::Trace && self.stroke < self.model.len() {
+            self.glimpse = GLIMPSE_SECONDS;
+        }
     }
 
     fn begin_lesson(&mut self, lesson: usize, style: Style) {
@@ -316,6 +348,7 @@ fn keys(mut keys: MessageReader<KeyPressed>, mut practice: ResMut<Practice>, mut
             practice.lesson = None;
         } else if key.typed == Some(' ') {
             practice.glimpse = GLIMPSE_SECONDS;
+            practice.helped = true;
             practice.dirty = true;
         }
     }
@@ -422,23 +455,43 @@ fn finish_stroke(practice: &mut Practice, progress: &mut Progress) {
         return;
     };
     let ok = if target.dot {
-        dot_matches(&ink, &target.points)
+        let ok = dot_matches(&ink, &target.points);
+        if !ok {
+            practice.message = "The dot: a short touch above the stem".into();
+        }
+        ok
     } else {
-        let medians: Vec<Vec<Vec2>> = practice.model.iter().map(|s| s.points.clone()).collect();
-        let options = Options { leniency: 0.8, outline_visible: practice.stage() != Stage::Blank };
-        match matcher::stroke_matches(&ink, &medians, practice.stroke, options) {
+        let medians: Vec<Vec<Vec2>> = practice.model.iter().map(|s| to_match(&s.points)).collect();
+        let scaled = to_match(&ink);
+        let blank = practice.stage() == Stage::Blank;
+        let options = Options { leniency: if blank { LENIENCY_BLANK } else { LENIENCY }, outline_visible: !blank };
+        match matcher::stroke_matches(&scaled, &medians, practice.stroke, options) {
             Outcome::Match => true,
             Outcome::Backwards => {
                 practice.message = "The right stroke, the other way round: start at the dot".into();
                 false
             }
-            _ => false,
+            _ => {
+                use matcher::Problem;
+                practice.message = match matcher::diagnose(&scaled, &medians[practice.stroke], practice.stroke, options) {
+                    Some(Problem::Far) if blank => "Far from where the stroke goes: Space shows it".into(),
+                    Some(Problem::Far) => "Far from the model: write over the blue stroke".into(),
+                    Some(Problem::Start) => "Start at the dot".into(),
+                    Some(Problem::End) => "It ends elsewhere: follow the stroke to its end".into(),
+                    Some(Problem::Direction) => "The other way round: start at the dot and follow the stroke".into(),
+                    Some(Problem::Short) => "Too short: the whole stroke in one movement, without lifting the pen".into(),
+                    Some(Problem::Shape) => "Not quite the shape: Space shows it written".into(),
+                    None => "Not quite: Space shows it written".into(),
+                };
+                false
+            }
         }
     };
     if !ok {
         practice.misses += 1;
         if practice.misses >= MISSES_BEFORE_GLIMPSE {
             practice.glimpse = GLIMPSE_SECONDS;
+            practice.helped = true;
             practice.misses = 0;
             practice.message = "Watch it once more, then write it".into();
         }
@@ -446,7 +499,7 @@ fn finish_stroke(practice: &mut Practice, progress: &mut Progress) {
         return;
     }
     practice.total += 1;
-    if practice.misses == 0 && practice.glimpse <= 0.0 {
+    if practice.misses == 0 && !practice.helped {
         practice.first_try += 1;
     }
     if !target.dot
@@ -456,9 +509,11 @@ fn finish_stroke(practice: &mut Practice, progress: &mut Progress) {
     }
     practice.message.clear();
     practice.misses = 0;
+    practice.helped = false;
     practice.written.push(ink);
     practice.stroke += 1;
     if practice.stroke < practice.model.len() {
+        practice.demonstrate();
         return;
     }
     // The figure written: again, the next figure, or the end of the lesson.
@@ -506,6 +561,7 @@ fn end_lesson(practice: &mut Practice, progress: &mut Progress) {
 
 fn show_me(_: On<Activate>, mut practice: ResMut<Practice>, mut focus: ResMut<InputFocus>) {
     practice.glimpse = GLIMPSE_SECONDS;
+    practice.helped = true;
     practice.dirty = true;
     focus.clear();
 }
@@ -799,9 +855,9 @@ mod tests {
         let lessons = letters::lessons();
         for figure in lessons.iter().flat_map(|l| &l.figures) {
             let model = to_pixels(&figure.on_sheet(Style::Spencerian), Style::Spencerian);
-            let medians: Vec<Vec<Vec2>> = model.iter().map(|s| s.points.clone()).collect();
+            let medians: Vec<Vec<Vec2>> = model.iter().map(|s| to_match(&s.points)).collect();
             for (i, stroke) in model.iter().enumerate().filter(|(_, s)| !s.dot) {
-                let outcome = matcher::stroke_matches(&stroke.points, &medians, i, Options { leniency: 0.8, outline_visible: false });
+                let outcome = matcher::stroke_matches(&to_match(&stroke.points), &medians, i, Options { leniency: LENIENCY_BLANK, outline_visible: false });
                 assert_eq!(outcome, Outcome::Match, "{} stroke {i}", figure.name);
             }
             // Within the image.
@@ -819,5 +875,111 @@ mod tests {
         // A backhand stroke is over 90°.
         let (angle, _) = downstroke_slant(&[Vec2::ZERO, Vec2::new(30.0, UNIT)]).unwrap();
         assert!(angle > 90.0);
+    }
+}
+
+#[cfg(test)]
+mod calibration {
+    use super::*;
+
+    /// A hand-drawn stroke, in the pixels of the sheet: the model scaled about its center (in
+    /// x and in y), moved and jittered.
+    fn hand(points: &[Vec2], scale: Vec2, offset: Vec2, jitter: f32, seed: f32) -> Vec<Vec2> {
+        let center = points.iter().copied().sum::<Vec2>() / points.len() as f32;
+        let mut out = Vec::new();
+        for (i, w) in points.windows(2).enumerate() {
+            for k in 0..4 {
+                let t = k as f32 / 4.0;
+                let p = w[0].lerp(w[1], t);
+                let n = (i * 4 + k) as f32;
+                let noise = Vec2::new((n * 0.7 + seed).sin(), (n * 1.1 + seed).cos()) * jitter;
+                out.push(center + (p - center) * scale + offset + noise);
+            }
+        }
+        out.push(center + (points[points.len() - 1] - center) * scale + offset);
+        out
+    }
+
+    fn variants() -> Vec<(Vec2, Vec2, f32)> {
+        vec![
+            (Vec2::splat(1.0), Vec2::ZERO, 4.0),
+            (Vec2::splat(0.9), Vec2::new(15.0, -10.0), 6.0),
+            (Vec2::splat(1.1), Vec2::new(-15.0, 12.0), 6.0),
+            (Vec2::splat(0.85), Vec2::new(30.0, 20.0), 10.0),
+            (Vec2::splat(1.15), Vec2::new(-25.0, -30.0), 10.0),
+            (Vec2::splat(1.0), Vec2::new(40.0, 0.0), 14.0),
+            // Squeezed and stretched: the proportions of a hand.
+            (Vec2::new(0.8, 1.1), Vec2::new(10.0, 10.0), 8.0),
+            (Vec2::new(1.2, 0.9), Vec2::new(-10.0, 20.0), 8.0),
+        ]
+    }
+
+    #[test]
+    #[ignore = "prints the match rates of simulated hand strokes per leniency"]
+    fn match_rates() {
+        let lessons = letters::lessons();
+        let variants = variants();
+        for outline in [true, false] {
+            for leniency in [1.0, 1.2, 1.4, 1.6, 1.8] {
+                let (mut n, mut ok) = (0, 0);
+                let mut worst: Vec<(String, usize)> = Vec::new();
+                for figure in lessons.iter().flat_map(|l| &l.figures) {
+                    let model = to_pixels(&figure.on_sheet(Style::Spencerian), Style::Spencerian);
+                    let medians: Vec<Vec<Vec2>> = model.iter().map(|s| to_match(&s.points)).collect();
+                    for (i, stroke) in model.iter().enumerate() {
+                        if stroke.dot {
+                            continue;
+                        }
+                        let mut misses = 0;
+                        for (v, (scale, offset, jitter)) in variants.iter().enumerate() {
+                            n += 1;
+                            let ink = to_match(&hand(&stroke.points, *scale, *offset, *jitter, v as f32));
+                            let options = Options { leniency, outline_visible: outline };
+                            if matcher::stroke_matches(&ink, &medians, i, options) == Outcome::Match {
+                                ok += 1;
+                            } else {
+                                misses += 1;
+                            }
+                        }
+                        if misses > 0 {
+                            worst.push((format!("{} s{}", figure.name, i + 1), misses));
+                        }
+                    }
+                }
+                worst.sort_by_key(|w| std::cmp::Reverse(w.1));
+                let shown: Vec<String> = worst.iter().take(8).map(|(f, m)| format!("{f}:{m}")).collect();
+                println!("outline {outline} leniency {leniency}: {ok}/{n} matched; most missed {}", shown.join(" "));
+            }
+        }
+        println!("(the simulated strokes are the model scaled 0.8-1.2, moved up to 40 px, jittered 4-14 px)");
+    }
+
+    #[test]
+    fn hand_strokes_pass_and_a_half_stroke_says_why() {
+        let lessons = letters::lessons();
+        for figure in lessons.iter().flat_map(|l| &l.figures) {
+            let model = to_pixels(&figure.on_sheet(Style::Spencerian), Style::Spencerian);
+            let medians: Vec<Vec<Vec2>> = model.iter().map(|s| to_match(&s.points)).collect();
+            for (i, stroke) in model.iter().enumerate().filter(|(_, s)| !s.dot) {
+                for (v, (scale, offset, jitter)) in variants().iter().enumerate() {
+                    let ink = to_match(&hand(&stroke.points, *scale, *offset, *jitter, v as f32));
+                    for (leniency, outline) in [(LENIENCY, true), (LENIENCY_BLANK, false)] {
+                        let options = Options { leniency, outline_visible: outline };
+                        assert_eq!(matcher::stroke_matches(&ink, &medians, i, options), Outcome::Match, "{} stroke {i} variant {v}", figure.name);
+                    }
+                }
+            }
+        }
+        // A push-pull that only goes up: it ends at the top, not back at the base. One far from
+        // the model, one started a space away.
+        let push_pull = to_pixels(&lessons[0].figures[0].on_sheet(Style::Spencerian), Style::Spencerian);
+        let model = to_match(&push_pull[0].points);
+        let options = Options { leniency: LENIENCY, outline_visible: true };
+        let half = to_match(&push_pull[0].points[..push_pull[0].points.len() / 2 + 1]);
+        assert_eq!(matcher::diagnose(&half, &model, 0, options), Some(matcher::Problem::End));
+        let far: Vec<Vec2> = push_pull[0].points.iter().map(|p| (*p + Vec2::new(0.0, 3.0 * UNIT)) * MATCH_SCALE).collect();
+        assert_eq!(matcher::diagnose(&far, &model, 0, options), Some(matcher::Problem::Far));
+        let shifted: Vec<Vec2> = push_pull[0].points.iter().map(|p| (*p + Vec2::new(1.3 * UNIT, 0.0)) * MATCH_SCALE).collect();
+        assert!(matches!(matcher::diagnose(&shifted, &model, 0, options), Some(matcher::Problem::Far | matcher::Problem::Start)));
     }
 }

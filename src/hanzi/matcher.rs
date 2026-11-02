@@ -82,6 +82,53 @@ pub fn stroke_matches(user: &[Vec2], medians: &[Vec<Vec2>], stroke: usize, optio
     Outcome::Match
 }
 
+/// Why a stroke was not accepted: the first check that failed, for the messages. `None` when
+/// the checks pass one by one (the stroke was then closer to another stroke of the character).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Problem {
+    /// Far from the stroke on the whole.
+    Far,
+    /// Starts elsewhere.
+    Start,
+    /// Ends elsewhere.
+    End,
+    /// Goes the other way.
+    Direction,
+    /// Too short.
+    Short,
+    /// Another shape.
+    Shape,
+}
+
+pub fn diagnose(user: &[Vec2], median: &[Vec2], stroke: usize, options: Options) -> Option<Problem> {
+    let points = strip_duplicates(user);
+    if points.len() < 2 || median.len() < 2 {
+        return Some(Problem::Short);
+    }
+    let leniency = options.leniency;
+    let dist_mod = if options.outline_visible || stroke > 0 { 0.5 } else { 1.0 };
+    if average_distance(median, &points) > AVERAGE_DISTANCE_THRESHOLD * dist_mod * leniency {
+        return Some(Problem::Far);
+    }
+    let threshold = START_AND_END_DIST_THRESHOLD * leniency;
+    if median[0].distance(points[0]) > threshold {
+        return Some(Problem::Start);
+    }
+    if median[median.len() - 1].distance(points[points.len() - 1]) > threshold {
+        return Some(Problem::End);
+    }
+    if !direction_matches(&points, median) {
+        return Some(Problem::Direction);
+    }
+    if !length_matches(&points, median, leniency) {
+        return Some(Problem::Short);
+    }
+    if !shape_fit(&points, median, leniency) {
+        return Some(Problem::Shape);
+    }
+    None
+}
+
 struct MatchData {
     is_match: bool,
     backwards: bool,
@@ -361,6 +408,22 @@ mod tests {
         let low: Vec<Vec2> = medians[0].iter().map(|p| *p - Vec2::new(0.0, 80.0)).collect();
         let low = accuracy(&low, &medians[0]);
         assert!(low < wobbly && low > 40.0, "{low}");
+    }
+
+    #[test]
+    fn the_problem_of_a_miss() {
+        let medians = shi();
+        let o = Options::default();
+        let scribble = vec![Vec2::new(100.0, 900.0), Vec2::new(120.0, 880.0), Vec2::new(90.0, 860.0)];
+        assert_eq!(diagnose(&scribble, &medians[0], 0, o), Some(Problem::Far));
+        // Half of the horizontal stroke: it ends in the middle.
+        let half = vec![Vec2::new(150.0, 400.0), Vec2::new(500.0, 405.0)];
+        assert_eq!(diagnose(&half, &medians[0], 0, o), Some(Problem::End));
+        // The right stroke, backwards.
+        let mut reversed = wobbly(&medians[0]);
+        reversed.reverse();
+        assert_eq!(diagnose(&reversed, &medians[0], 0, o), Some(Problem::Start));
+        assert_eq!(diagnose(&wobbly(&medians[0]), &medians[0], 0, o), None);
     }
 
     #[test]
