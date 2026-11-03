@@ -353,6 +353,9 @@ pub struct HanziProgress {
     pub levels_done: BTreeMap<usize, u32>,
     /// The weak words are reviewed instead of the level, see [`crate::hanzi::weak_words`].
     pub review: bool,
+    /// The writes of a new word, 0 for the automatic count (ten, fewer as the words learned
+    /// grow), see [`crate::hanzi::n_writes`].
+    pub writes: u32,
     /// The words of the review, picked when it starts, and the one being written.
     pub review_words: Vec<String>,
     pub review_word: usize,

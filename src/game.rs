@@ -43,8 +43,10 @@ pub struct Exercise {
     pub char_set: Vec<char>,
     /// The misses of this exercise per expected character.
     pub misses: BTreeMap<char, u32>,
-    /// Klavaro's comment at the end of the exercise.
+    /// Klavaro's comment at the end of the exercise, the tip of the summary.
     pub message: String,
+    /// "New record!", faster than the best time of the lesson.
+    pub record: Option<String>,
     /// The finger drill suggested at the end, with the reason.
     pub suggestion: Option<(u8, String)>,
     /// The most missed characters of a failed exercise, red on the keyboard until the next one.
@@ -130,6 +132,30 @@ pub struct KeyPressed {
     pub chord: Option<Chord>,
 }
 
+/// When the last key, click or touch came, in the seconds of `Time<Real>`: the hints of the
+/// keys to go on with appear after a pause, see [`crate::ui`].
+#[derive(Resource, Default)]
+pub struct LastInput(pub f64);
+
+impl LastInput {
+    /// The seconds without a key, a click or a touch.
+    pub fn idle(&self, time: &Time<Real>) -> f64 {
+        time.elapsed_secs_f64() - self.0
+    }
+}
+
+fn note_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<bevy::input::touch::Touches>,
+    time: Res<Time<Real>>,
+    mut last: ResMut<LastInput>,
+) {
+    if keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || touches.iter_just_pressed().next().is_some() {
+        last.0 = time.elapsed_secs_f64();
+    }
+}
+
 /// The typing and the new exercises, the views run after them.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GameSystems;
@@ -182,12 +208,14 @@ impl Plugin for GamePlugin {
             .insert_resource(Grid(grid))
             .insert_resource(ActiveLayout(layout))
             .init_resource::<Modifiers>()
+            .init_resource::<LastInput>()
             .add_message::<NewExercise>()
             .add_message::<Touched>()
             .add_message::<KeyPressed>()
             .add_systems(
                 Update,
                 (
+                    note_input,
                     read_keys,
                     crate::keyboard::on_screen_keys,
                     handle_typing,
@@ -277,6 +305,7 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         char_set,
         misses: BTreeMap::new(),
         message: String::new(),
+        record: None,
         suggestion: None,
         review: Vec::new(),
         trend: None,
@@ -393,6 +422,7 @@ fn read_keys(
     mut panel: ResMut<crate::ui::Panel>,
     mut pressed: MessageWriter<KeyPressed>,
     mut zoom: MessageWriter<crate::zoom::Zoom>,
+    mut new_exercise: MessageWriter<NewExercise>,
 ) {
     for event in events.read() {
         let down = event.state == ButtonState::Pressed;
@@ -414,9 +444,9 @@ fn read_keys(
             panel.toggle(crate::ui::Panel::Help);
             continue;
         }
-        // Enter on the welcome continues where the last session stopped.
-        if down && *panel == crate::ui::Panel::Welcome && event.logical_key == Key::Enter {
-            *panel = crate::ui::Panel::None;
+        // F5, as the circling arrow: the exercise, the word or the lesson again.
+        if down && event.logical_key == Key::F5 {
+            new_exercise.write_default();
             continue;
         }
         if down && open && event.logical_key == Key::Escape {
@@ -629,9 +659,6 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         }
         ExerciseMode::Shortcuts | ExerciseMode::Hanzi | ExerciseMode::Penmanship => String::new(),
     };
-    if results.n_errors == 0 {
-        exercise.message = format!("Congratulations, not a single error! Well done.\n{}", exercise.message);
-    }
     exercise.suggestion = suggest(exercise, progress, layout);
     if results.accuracy < goal(mode) {
         let mut missed: Vec<(char, u32)> = exercise.misses.iter().map(|(c, n)| (*c, *n)).collect();
@@ -642,10 +669,6 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
                 exercise.review.iter().map(|c| if *c == ' ' { "Space".into() } else { c.to_string() }).collect();
             exercise.message.push_str(&format!("\nFocus next time: {}, red on the keyboard", keys.join("  ")));
         }
-    } else if mode == ExerciseMode::Basic && exercise.lesson < N_BASIC_LESSONS {
-        exercise.message.push_str(&format!("\nLesson {} unlocked.", exercise.lesson + 1));
-    } else if mode == ExerciseMode::Layers && exercise.lesson < crate::course::layer_lessons(layout).len() {
-        exercise.message.push_str(&format!("\nLayer lesson {} unlocked.", exercise.lesson + 1));
     }
     let n_layer_lessons = crate::course::layer_lessons(layout).len().max(1);
     let lesson_key = match mode {
@@ -665,13 +688,12 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             && results.velocity > best.velocity
             && results.velocity > 0.0
         {
-            exercise.message = format!(
-                "New record! {:.1} WPM faster than your best of {:.1} WPM, on {}.\n{}",
+            exercise.record = Some(format!(
+                "New record! {:.1} WPM faster than your best of {:.1} WPM, on {}.",
                 results.velocity - best.velocity,
                 best.velocity,
                 crate::stats::short_date(best.finished_at),
-                exercise.message
-            );
+            ));
         }
     }
     let current = progress.current();

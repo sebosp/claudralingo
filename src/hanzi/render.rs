@@ -51,6 +51,23 @@ pub struct Frame<'a> {
     pub echo: Option<(&'a [Vec2], &'a [f32], f32)>,
     /// The brush guide of the next stroke.
     pub guide: Option<&'a Guide>,
+    /// The tip of the brush writing the word before the eyes, in pixels.
+    pub tip: Option<Vec2>,
+}
+
+/// The point at `t` (0 to 1) of the length of a median, in pixels.
+pub fn point_along(median: &[Vec2], t: f32) -> Option<Vec2> {
+    let points: Vec<Vec2> = median.iter().map(|p| to_pixels(*p)).collect();
+    let total: f32 = points.windows(2).map(|w| w[0].distance(w[1])).sum();
+    let mut left = total * t.clamp(0.0, 1.0);
+    for w in points.windows(2) {
+        let d = w[0].distance(w[1]);
+        if d >= left {
+            return Some(w[0].lerp(w[1], if d > 0.0 { left / d } else { 1.0 }));
+        }
+        left -= d;
+    }
+    points.last().copied()
 }
 
 fn paint(color: Color, alpha: f32) -> Paint<'static> {
@@ -292,6 +309,19 @@ pub fn draw(pixmap: &mut Pixmap, glyph: &Glyph, frame: &Frame, colors: &Colors) 
         brush_ink(pixmap, frame.ink, frame.ink_widths, colors.user, 0.85);
     } else if let Some(path) = polyline(frame.ink) {
         pixmap.stroke_path(&path, &paint(colors.user, 0.85), &pen, ts, None);
+    }
+    // The brush: a disc with a lighter core, where the stroke is being written.
+    if let Some(tip) = frame.tip {
+        let mut pb = PathBuilder::new();
+        pb.push_circle(tip.x, tip.y, 13.0);
+        if let Some(path) = pb.finish() {
+            pixmap.fill_path(&path, &paint(colors.next, 1.0), FillRule::Winding, ts, None);
+        }
+        let mut pb = PathBuilder::new();
+        pb.push_circle(tip.x, tip.y, 5.0);
+        if let Some(path) = pb.finish() {
+            pixmap.fill_path(&path, &paint(colors.paper, 0.9), FillRule::Winding, ts, None);
+        }
     }
 }
 

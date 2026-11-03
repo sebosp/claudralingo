@@ -1,7 +1,45 @@
 # Claudralingo
 
 A typing tutor made with [Bevy](https://bevyengine.org) 0.20 and its
-[feathers](https://docs.rs/bevy_feathers/0.20.0) widgets. It runs natively and in the browser.
+[feathers](https://docs.rs/bevy_feathers/0.20.0) widgets. It runs natively and in the browser:
+**play it at [sebosp.github.io/claudralingo](https://sebosp.github.io/claudralingo/)**, the
+progress stays in the browser.
+
+| Platform        | How to get it                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Web             | [sebosp.github.io/claudralingo](https://sebosp.github.io/claudralingo/), a browser with WebGPU or WebGL2, built from `main` |
+| Linux x86_64    | `claudralingo-linux-x86_64.tar.gz` of the [releases](https://github.com/sebosp/claudralingo/releases), or the Arch packages, see [Install on Arch Linux](#install-on-arch-linux) |
+| Android (arm64) | `claudralingo-android-arm64.apk` of the releases (a debug signature: allow the unknown source)                     |
+| iOS             | the simulator build of the releases; a device needs an Apple signing identity, the project is in `mobile/`          |
+| Windows, macOS  | from the sources with cargo, see [Build](#build); no build is published yet                                         |
+
+## Screenshots
+
+A basic lesson on the Corne, the next key green on the keyboard, the fingers striped in their
+colors:
+
+![A basic lesson on the Corne](docs/screenshots/typing.png)
+
+The end of a finger drill: the summary says how it went and where Enter goes, green on to the
+next lesson, amber the same one again:
+
+![The summary at the end of a drill](docs/screenshots/summary.png)
+
+A hanzi word: the bar of its writes over the drawing, the brush guide of the next stroke, the
+word glowing once a write is done; then the pinyin in its field:
+
+![A hanzi word being traced](docs/screenshots/hanzi.png)
+
+![The pinyin of the word](docs/screenshots/hanzi-pinyin.png)
+
+The penmanship: the push-pulls on the Spencerian sheet, the pen writing the stroke before the
+eyes with the counts 1 and 2 of the copybooks:
+
+![The push-pulls demonstrated](docs/screenshots/penmanship.png)
+
+The lessons on their path, graded Good, Great or Legendary, the ones ahead dim:
+
+![The lessons panel](docs/screenshots/lessons.png)
 
 ## Roadmap
 
@@ -20,7 +58,13 @@ The first menu of the toolbar is what you learn, Touch typing, Hanzi or Penmansh
 one its exercise (touch typing) or its HSK level and the weak words (hanzi). ‹ › go through the
 lessons of the exercise: the basic or the layer lesson, the finger, the hand of the bounces, the
 level within the HSK level. They are grayed out at the ends, before a locked lesson and in the
-exercises without lessons. Lessons and Stats show those of the first menu.
+exercises without lessons. Then the icons: the circling arrow (F5) starts the text, the word or
+the figure again, the notebook opens the lessons and the bars the stats (those of the first
+menu), the gear the settings, `?` the help. The app opens on the exercise of the last session.
+
+The bar at the bottom shows the keys of the moment. The key to go on with once an exercise is
+done (Enter) appears after a pause of five seconds: whoever knows it has pressed it by then. The
+help (`?` or F1) lists every shortcut.
 
 The setting "Hide the toolbar" puts it over the top of the window, it shows when the pointer goes
 to the top or touches it; F11 is the full screen, the toolbar hides there too. Zoomed in, the
@@ -36,7 +80,7 @@ The four Klavaro exercises, with their original texts and goals, and two of Clau
 | Adaptability     | random weird words, made of your worst keys when needed    | 98% accuracy                       |
 | Velocity         | random words of Klavaro's dictionary                       | 95% accuracy, 50 WPM               |
 | Fluidness        | paragraphs of a text                                       | 97% accuracy, 50 WPM, 70% fluidity |
-| Finger drill     | the keys of one finger, up and down its column             | 95% accuracy                       |
+| Finger drill     | the keys of one finger, up and down its column, four lines | 95% accuracy, Enter: the next finger |
 | Finger bounce    | middle and index of one hand in turns, alternating case    | 95% accuracy, slower is expected   |
 | Shortcuts & keys | Esc, editing shortcuts, arrows, numbers, symbols, Alt+Tab  | every key on the first try         |
 
@@ -200,11 +244,11 @@ keymap away, see `corne36` in `src/layout.rs`.
 - **Sounds** (setting, off by default): a bell on a miss, a chime on a line without a slip and a
   chord on a passed exercise, a falling tone for a key held too long by the auto shift, all
   synthesized (`src/sounds.rs`).
-- **Welcome back**: at the start, the last exercise with its accuracy against its goal and how
-  long ago it was (5 minutes ago, yesterday, 10 days ago, past 15 days the day and the time),
-  the exercise up next; continue there (Enter), or warm up first on the keys that need it most,
-  their misses weighing more when they were not practiced for a while (a spaced repetition),
-  then back to the lesson. The warm-up is also in the menu.
+- **Last time**: the first line of the stats is the last exercise with its accuracy against its
+  goal and how long ago it was (5 minutes ago, yesterday, 10 days ago, past 15 days the day and
+  the time), and the exercise up next. "Warm-up: weak keys" in the second menu drills the keys
+  that need it most, their misses weighing more when they were not practiced for a while (a
+  spaced repetition), then goes back to the lesson.
 - **Locked lessons** (setting, on by default): a lesson of the basic and the layer course, and a
   hanzi level, opens when the previous one is passed.
 - **Auto shift**: a capital by a key held too long, or a capital missed, is named in a badge over
@@ -221,11 +265,27 @@ to the last right character: the motion to learn on a Corne. A slip is one error
 keys follow it. Settings, "Fix mistakes with Backspace" off: the cursor waits on the missed key
 instead. At the end, the bar at the top shows the
 words per minute, the accuracy and the fluidness, with ▲ (better), ▼ (worse) or ● (the same)
-against the last time of the same lesson; a new best speed for the lesson is congratulated with
-the gain and the date of the previous record. The keys of the moment (Enter, Backspace, Tab,
+against the last time of the same lesson. Under it the summary: "Lesson 7 complete" or "Lesson
+7: below the goal", the accuracy against the goal, then where Enter goes, green when it goes on
+to the next lesson or the next finger, amber when it repeats the same one; a new best speed for
+the lesson is congratulated in green with the gain and the date of the previous record, and
+Klavaro's comment comes as a tip. The keys of the moment (Enter, Backspace, Tab,
 ← → for the lessons) are in the bar at the bottom. The arrows change the lesson only before the
 first key and at the end: hit by mistake in the middle of an exercise (they sit under the letters
 on the small keyboards) they would throw it away; the ‹ › buttons work at any time.
+
+## Lessons
+
+The notebook of the toolbar shows the lessons of the first menu on a path: a node per course or
+HSK level (the basic course, the layer course, the finger drills; HSK 1 to 4; the small
+letters), the line under it filling with the lessons passed, the node in the color of the grade
+once all of them are. A passed lesson is graded as the games do: Good from the goal of the
+exercise, Great from 98% (90% of the strokes on the first try in the penmanship, four misses at
+most on the ten words of a hanzi level), Legendary without a single error; green, purple and
+gold, the ladder of the loot of the games. A lesson tried but below the goal shows its best
+accuracy in amber, the one in progress has a cyan border, the ones ahead are dim: with "Lock
+lessons" on, the pointer over one says which lesson to pass first; off, a click jumps ahead. A
+click on a lesson practices it, a click beside the panel closes it.
 
 ## Themes and the compact view
 
@@ -286,7 +346,14 @@ A new word is written ten times (3 traced, 3 over the faded outline, 2 filled in
 memory), two fewer each time it comes back, never under two (filled in, then from memory); a
 weak word, one that had a stroke shown, gets two more. As the words learned grow the new ones
 start lower: eight writes from ten words, six from thirty, five from a hundred. The word on the
-screen is the one spoken: the next word is said when it comes up.
+screen is the one spoken: the next word is said when it comes up. Before the first trace of a
+word the brush writes it before the eyes, stroke by stroke (a pen down skips it). The bar over
+the drawing fills with the writes, the pinyin the last step; the word and "Well done" glow
+green once a write is done, to sink in. Settings, "Hanzi writes": the writes of a new word, auto
+(ten, fewer as you learn) or a count up to a hundred. Beside the drawing: what
+to do now, the stroke it is at ("Stroke 2 of 6", with its kind while the outline is there), and
+the last stroke's accuracy in green or the miss in red. The pinyin is typed in a field with a
+blinking caret: the keys go there.
 
 A stroke is compared with the strokes of the character as Hanzi Writer does (a port of its
 matcher): its distance, start and end, direction, shape (Fréchet distance) and length. A stroke
@@ -296,8 +363,8 @@ ends): "横 92%, excellent". After three misses on a stroke it is written before
 glimpse (Hint too): a penalty, it counts as two misses in the accuracy of the word, and the word
 becomes weak. "Weak words" in the second menu reviews the weakest ten; written there without help
 a word is less weak. A step with three misses is done again. The level, the word and a word of
-encouragement show over the drawing when a word starts, then fade. The words are spoken (Listen, or Space while drawing; "Speak the words" beside Listen turns that
-off). The pinyin
+encouragement show over the drawing when a word starts, then fade. The words are spoken (the speaker button, or Space while drawing; Sound in the settings turns
+that off). The pinyin
 candidates are the HSK words, then the words of the `inputx-pinyin` dictionary, with the
 characters of the embedded font. Every text falls back on that font for the hanzi, the meanings
 cite some (`as in 意`). The drawing grows with the window, beside the word or under it. The data
@@ -317,7 +384,7 @@ else with the speed, slow is thick, as a brush that rests. An accepted stroke st
 the character, and its thickness is compared with the stroke's at the start, the middle and the
 end: "Lift toward the end", "Press at the start".
 
-**Strokes** (the button beside Hint): the word broken down, every character stroke by stroke with
+**Stroke breakdown** (the button beside Hint): the word broken down, every character stroke by stroke with
 the names of the strokes. A click on a stroke shows it with its brush guide, how the brush writes
 it, the basic strokes it is made of (横 竖 撇 捺 点 提 钩 折 弯, a click describes one) and the
 characters of the HSK words that have it too, a click breaks one down in turn.
@@ -325,23 +392,43 @@ characters of the HSK words that have it too, a click breaks one down in turn.
 ## Penmanship
 
 Spencerian script (52°, the 2:1:2 sheet: the loops three spaces high, the descenders two below)
-and Copperplate (55°, the 3:2:3 sheet), the button under the sheet switches. The sheet has the
-base and head lines, the ascender and descender lines with their dotted halves, and the slant
-lines every half space.
+and Copperplate (55°, the 3:2:3 sheet), picked in the settings (the Penmanship tab). The sheet
+has the base and head lines, the ascender and descender lines with their dotted halves, and the
+slant lines every half space. The same tab sets the writes of a figure (five by default, up to a
+hundred) and the rows of the pad (one to four): the writes go down the rows, the sheet clears
+once they are full.
 
 The lessons follow the copybooks: push-pulls, the direct and reversed ovals, the principles 1 to
 3 (straight line, right curve, left curve), i u w, n m v x, o a e c, r s, t d p q, the extended
 loop, h k l b, j y g z f. The letters are built from the principles of the *Theory of
 Spencerian Penmanship* (1874), the model shows the shades of the downstrokes. Each figure is
 written five times: over the model with the next stroke highlighted, over the faded model,
-then three times on the empty sheet; the dot marks where the stroke starts. On the first write
-each stroke is shown being written before it is asked; a stroke is one movement from the dot to
-the end of the model, without lifting the pen (a push-pull goes up the slant and back down the
-same line, an oval once around from the top). A miss says what went wrong: the start, the end,
-too short, the other way round, the shape. Three misses on a stroke show it being written again
-(Space or Show me any time): the stroke then no longer counts as a first try. Under the sheet,
-the slant of your downstrokes against the sheet's. A lesson with 75% of its strokes right on the
-first try opens the next one.
+then three times on the empty sheet; the dot marks where the stroke starts. When a figure
+starts it is written before the eyes, stroke after stroke (F5 or the circling arrow show it
+again, a pen down stops it): a pen travels the stroke in the color of the hanzi brush guide, and
+the counts of the copybooks (1, 2, 3...) appear on the sheet where each part of the movement
+begins, the 1 at the dot of a push-pull, the 2 at the head line where it turns back down. A stroke is one movement from the dot to the end of the model, without
+lifting the pen (a push-pull goes up the slant and back down the same line, an oval once around
+from the top). A miss says what went wrong: the start, the end, too short, the other way round,
+the shape. The dot marks where the next stroke starts in every write, on the empty sheet too. A line drawn
+on another slant of the figure is named ("That is stroke 5 of the figure, the dot marks stroke
+4"). The Hint
+button (or Space) shows the stroke again; it appears after two misses on a stroke or a pause of
+eight seconds, three misses show the stroke by themselves: that write then no longer counts as a
+first try. The bar over the sheet has a segment per write of each figure.
+Under the sheet, the slant of your downstrokes against the sheet's. A lesson with 75% of its
+strokes right on the first try opens the next one.
+
+## Print
+
+The printer button of the hanzi and the penmanship opens a preview of an A4 page in black and
+white: the word in practice grids, the characters of the word in turn across each row, or the
+figures of the lesson on ruled rows with their slant lines and the dot where each stroke
+starts. The first copy of each row is the model in black, the others are light gray to trace
+over; − and + set how many across and how many rows, the page cuts what does not fit. "Save
+the PDF" writes `claudralingo-hanzi-ren.pdf` or `claudralingo-penmanship-push-pulls.pdf` to
+`~/Downloads` (or the home), a PDF written by hand (`src/print.rs`): one page of paths, no
+fonts. The browser build shows the preview but cannot save files yet.
 
 ## Progress
 
@@ -358,7 +445,9 @@ loses at most those seconds; the last 5000 sessions are kept per layout. Per lay
   `proficiency.log` in Klavaro), they generate the adaptability words.
 
 The theme (dark by default), the layout, the exercise, `fade_legends` and `layer_trainer` are
-saved too.
+saved too. The settings panel has a tab for the general settings and one per subject: touch
+typing, hanzi (sound, T9, the writes of a word, the brush) and penmanship (the sheet, the
+writes, the rows), it opens on the tab of the subject of the moment.
 
 ## Build
 

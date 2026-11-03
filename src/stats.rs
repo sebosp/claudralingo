@@ -391,7 +391,8 @@ fn fill(
     let accuracy: Vec<Option<f64>> = (first..=today).map(|d| average(d, &|s: &Session| Some(s.accuracy))).collect();
     let best_wpm = wpm.iter().flatten().copied().fold(0.0, f64::max);
     let today_text = format!(
-        "Today {minutes:.0} of {goal} minutes{} · streak {streak} day{} · {} {} in 30 days · best day {best_wpm:.0}{}",
+        "{}\nToday {minutes:.0} of {goal} minutes{} · streak {streak} day{} · {} {} in 30 days · best day {best_wpm:.0}{}",
+        crate::ui::last_time(&progress, now),
         if minutes >= goal as f64 { ", goal met" } else { "" },
         if streak == 1 { "" } else { "s" },
         recent.len(),

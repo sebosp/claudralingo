@@ -236,6 +236,11 @@ impl Fonts {
                 _ => runs.push((c.to_string(), cjk)),
             }
         }
+        // Without a span left the root is not laid out again and the old text stays on the
+        // screen: the root is touched.
+        if runs.is_empty() {
+            commands.entity(root).insert(Text::new(""));
+        }
         for (run, cjk) in runs {
             let font = if cjk { self.cjk.clone() } else { self.latin.clone() };
             commands.spawn((

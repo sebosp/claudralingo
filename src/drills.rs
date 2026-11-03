@@ -5,7 +5,8 @@ use crate::layout::{Layout, Row};
 
 /// The accuracy to call a drill done, the goal of Klavaro's basic course.
 pub const GOAL_ACCURACY: f64 = 95.0;
-const N_LINES: usize = 5;
+/// The pinky tires: the drills are short.
+const N_LINES: usize = 4;
 const WORDS_PER_LINE: usize = 8;
 /// The chance to change of row on each key, the drills are about moving the finger.
 const ROW_CHANGE: f64 = 0.75;

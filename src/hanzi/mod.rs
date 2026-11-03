@@ -21,7 +21,7 @@ use std::sync::Arc;
 use bevy::asset::RenderAssetUsages;
 use bevy::feathers::controls::*;
 use bevy::feathers::display::{caption, label, label_dim};
-use bevy::feathers::theme::{ThemeBackgroundColor, ThemeTextColor, UiTheme};
+use bevy::feathers::theme::{ThemeBackgroundColor, ThemeBorderColor, ThemeTextColor, UiTheme};
 use bevy::feathers::tokens as feathers_tokens;
 use bevy::input_focus::InputFocus;
 use bevy::picking::events::{PointerClick, PointerDrag, PointerDragEnd, PointerPress, PointerRelease};
@@ -65,6 +65,11 @@ const ENCOURAGEMENTS: [&str; 10] = [
     "The brush follows the heart.",
 ];
 const WRONG_SECONDS: f32 = 0.6;
+/// A new word is written before the eyes first: the seconds per stroke, and after the last.
+const INTRO_STROKE: f32 = 0.55;
+const INTRO_END: f32 = 0.5;
+/// The word glows once a write is done, to sink in.
+const GLOW_SECONDS: f32 = 1.5;
 /// The last brush stroke stays over the character, to compare its thickness.
 const ECHO_SECONDS: f32 = 1.4;
 /// The misses of a step that repeat it.
@@ -99,12 +104,13 @@ pub enum Stage {
 /// The writes of a word before its pinyin: ten the first time, two fewer each time it comes
 /// back, never under two; a weak word (a stroke had to be shown) gets two more. A learner with
 /// many words behind starts the new ones lower: eight from ten words learned, six from thirty,
-/// five from a hundred.
-pub fn n_writes(stats: Option<&HanziWordStats>, words_learned: usize) -> usize {
-    let first: usize = match words_learned {
-        0..=9 => 10,
-        10..=29 => 8,
-        30..=99 => 6,
+/// five from a hundred; `wanted` (the settings) sets the first time instead, up to a hundred.
+pub fn n_writes(stats: Option<&HanziWordStats>, words_learned: usize, wanted: u32) -> usize {
+    let first: usize = match (wanted, words_learned) {
+        (1.., _) => wanted as usize,
+        (0, 0..=9) => 10,
+        (0, 10..=29) => 8,
+        (0, 30..=99) => 6,
         _ => 5,
     };
     let practiced = stats.map_or(0, |s| s.practiced) as usize;
@@ -139,11 +145,30 @@ pub fn plan(n: usize) -> Vec<Stage> {
 impl Stage {
     fn instructions(self) -> &'static str {
         match self {
-            Stage::Trace => "trace the strokes in order, over the outline",
-            Stage::Faded => "trace the strokes over the faded outline",
-            Stage::Partial => "fill in the missing strokes",
-            Stage::Memory => "write the word from memory",
-            Stage::Pinyin => "type the pinyin, then pick the word",
+            Stage::Trace => "Trace the strokes in order, over the outline",
+            Stage::Faded => "Trace the strokes over the faded outline",
+            Stage::Partial => "Fill in the missing strokes",
+            Stage::Memory => "Write the word from memory",
+            Stage::Pinyin => "Type the pinyin, then pick the word",
+        }
+    }
+}
+
+/// The color of the message: the last stroke accepted, missed, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Tone {
+    #[default]
+    Plain,
+    Good,
+    Bad,
+}
+
+impl Tone {
+    fn token(self) -> bevy::feathers::theme::ThemeToken {
+        match self {
+            Tone::Plain => feathers_tokens::TEXT_MAIN,
+            Tone::Good => tokens::CHAR_CORRECT,
+            Tone::Bad => tokens::CHAR_WRONG,
         }
     }
 }
@@ -187,7 +212,13 @@ pub struct Practice {
     accuracies: Vec<f32>,
     /// The word is one of the weak words reviewed.
     reviewing: bool,
+    /// The character written before the eyes, the brush following its strokes: the seconds
+    /// since it began, on the first write of a word.
+    intro: Option<f32>,
+    /// The seconds left of the glow of the word after a write.
+    glow: f32,
     pub message: String,
+    tone: Tone,
     /// The letters typed, or the digits of the nine keys.
     pub input: String,
     pub candidates: Vec<Candidate>,
@@ -245,6 +276,12 @@ struct DrawingRow;
 struct PinyinPanel;
 #[derive(Component, Default, Clone)]
 struct InputText;
+/// The box of the pinyin typed, drawn as a focused text field, with its blinking caret.
+#[derive(Component, Default, Clone)]
+struct Caret;
+/// The bar of the writes of the word, as wide as the drawing.
+#[derive(Component, Default, Clone)]
+struct HanziBar;
 #[derive(Component, Default, Clone)]
 struct CandidatesRow;
 #[derive(Component, Default, Clone)]
@@ -294,6 +331,7 @@ impl Plugin for HanziPlugin {
                     fade,
                     draw_canvas,
                     update_view,
+                    blink_caret,
                     update_kind_text,
                     update_candidates,
                     speak,
@@ -340,7 +378,7 @@ pub fn view() -> impl Scene {
                 flex_wrap: FlexWrap::Wrap,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Start,
-                column_gap: px(16),
+                column_gap: px(20),
                 row_gap: px(10),
                 width: percent(100),
                 padding: UiRect::horizontal(px(8)),
@@ -349,9 +387,11 @@ pub fn view() -> impl Scene {
             Children [
                 Node {
                     flex_direction: FlexDirection::Column,
-                    row_gap: px(8),
+                    row_gap: px(12),
                     width: px(SIDE),
                     max_width: percent(100),
+                    // Under the bar of the writes, level with the drawing.
+                    padding: UiRect::top(px(14)),
                 }
                 SideColumn
                 Children [
@@ -359,8 +399,8 @@ pub fn view() -> impl Scene {
                     Node {
                         flex_direction: FlexDirection::Row,
                         align_items: AlignItems::Center,
-                        column_gap: px(14),
-                        padding: UiRect::axes(px(14), px(8)),
+                        column_gap: px(16),
+                        padding: UiRect::axes(px(16), px(10)),
                         border_radius: BorderRadius::all(px(10)),
                     }
                     ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
@@ -376,70 +416,55 @@ pub fn view() -> impl Scene {
                         }
                         Children [
                             @label("") PinyinText
+                            TextFont { font_size: FontSize::Px(20.0) }
                             --
                             @label_dim("") MeaningText
+                            TextFont { font_size: FontSize::Px(15.0) }
                         ]
                     ]
                     --
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: px(10),
-                    }
-                    Children [
-                        @FeathersButton {
-                            @caption: bsn! { @caption("Listen") }
-                        }
-                        on(listen)
-                        --
-                        @crate::ui::setting_checkbox(crate::ui::Setting::Sound, "Speak the words")
-                    ]
-                    --
+                    // What to do now, and the stroke it is at.
                     @label("") StageText
-                    --
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: px(8),
-                        row_gap: px(8),
-                    }
-                    Children [
-                        @FeathersButton {
-                            @caption: bsn! { @caption("Hint") }
-                        }
-                        on(show_hint)
-                        --
-                        @FeathersButton {
-                            @caption: bsn! { @caption("Start over") }
-                        }
-                        on(restart_word)
-                        --
-                        @FeathersButton {
-                            @caption: bsn! { @caption("Strokes") }
-                        }
-                        on(breakdown::open)
-                        --
-                        @FeathersButton {
-                            @caption: bsn! { @caption("Next level") NextLevelCaption }
-                            @variant: ButtonVariant::Primary,
-                        }
-                        NextLevelButton
-                        Node { display: Display::None }
-                        on(next_level)
-                    ]
+                    TextFont { font_size: FontSize::Px(17.0) }
                     --
                     Text("") KindText
-                    ThemeTextColor(feathers_tokens::TEXT_MAIN)
+                    ThemeTextColor(feathers_tokens::TEXT_DIM)
+                    --
+                    @label("") MessageText
+                    TextFont { font_size: FontSize::Px(15.0) }
                     --
                     Node {
                         display: Display::None,
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Start,
-                        row_gap: px(8),
+                        row_gap: px(10),
                     }
                     PinyinPanel
                     Children [
-                        @label("") InputText
+                        // A text field with the focus: the keys go here now.
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            min_width: px(240),
+                            min_height: px(42),
+                            padding: UiRect::axes(px(12), px(6)),
+                            border: UiRect::all(px(2)),
+                            border_radius: BorderRadius::all(px(6)),
+                        }
+                        ThemeBackgroundColor(feathers_tokens::TEXT_INPUT_BG)
+                        ThemeBorderColor(feathers_tokens::FOCUS_RING)
+                        Children [
+                            @label("") InputText
+                            TextFont { font_size: FontSize::Px(20.0) }
+                            --
+                            Node {
+                                width: px(2),
+                                height: px(24),
+                                margin: UiRect::left(px(2)),
+                            }
+                            ThemeBackgroundColor(tokens::CURSOR)
+                            Caret
+                        ]
                         --
                         Node {
                             flex_direction: FlexDirection::Row,
@@ -465,47 +490,95 @@ pub fn view() -> impl Scene {
                         ]
                     ]
                     --
-                    @label("") MessageText
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        align_items: AlignItems::Center,
+                        column_gap: px(8),
+                        row_gap: px(8),
+                    }
+                    Children [
+                        @FeathersButton {
+                            @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Listen) }
+                        }
+                        on(listen)
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @caption("Hint") }
+                        }
+                        on(show_hint)
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @caption("Stroke breakdown") }
+                        }
+                        on(breakdown::open)
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Print) }
+                        }
+                        on(crate::print::open)
+                        --
+                        @FeathersButton {
+                            @caption: bsn! { @caption("Next level") NextLevelCaption }
+                            @variant: ButtonVariant::Primary,
+                        }
+                        NextLevelButton
+                        Node { display: Display::None }
+                        on(next_level)
+                    ]
                 ]
                 --
+                // The bar of the writes over the drawing, as wide as it.
                 Node {
-                    width: px(CANVAS),
-                    height: px(CANVAS),
-                    border_radius: BorderRadius::all(px(8)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(8),
                 }
-                ImageNode
-                CanvasNode
-                on(pen_down)
-                on(pen_move)
-                on(pen_up)
-                on(pen_drag_end)
                 Children [
-                    // Over the bottom of the drawing, the strokes start at the top; it lets the
-                    // pen through.
+                    @crate::ui::steps_bar()
                     Node {
-                        position_type: PositionType::Absolute,
-                        bottom: px(14),
-                        left: px(0),
-                        width: percent(100),
-                        display: Display::None,
-                        justify_content: JustifyContent::Center,
+                        width: px(CANVAS),
                     }
-                    Banner
-                    Pickable::IGNORE
+                    HanziBar
+                    --
+                    Node {
+                        width: px(CANVAS),
+                        height: px(CANVAS),
+                        border_radius: BorderRadius::all(px(8)),
+                    }
+                    ImageNode
+                    CanvasNode
+                    on(pen_down)
+                    on(pen_move)
+                    on(pen_up)
+                    on(pen_drag_end)
                     Children [
+                        // Over the bottom of the drawing, the strokes start at the top; it lets the
+                        // pen through.
                         Node {
-                            padding: UiRect::axes(px(16), px(8)),
-                            border_radius: BorderRadius::all(px(10)),
-                            max_width: percent(92),
+                            position_type: PositionType::Absolute,
+                            bottom: px(14),
+                            left: px(0),
+                            width: percent(100),
+                            display: Display::None,
+                            justify_content: JustifyContent::Center,
                         }
-                        BackgroundColor(Color::NONE)
+                        Banner
                         Pickable::IGNORE
                         Children [
-                            Text("") BannerText
-                            TextColor(Color::NONE)
-
-                            TextLayout { justify: Justify::Center }
+                            Node {
+                                padding: UiRect::axes(px(16), px(8)),
+                                border_radius: BorderRadius::all(px(10)),
+                                max_width: percent(92),
+                            }
+                            BackgroundColor(Color::NONE)
                             Pickable::IGNORE
+                            Children [
+                                Text("") BannerText
+                                TextColor(Color::NONE)
+
+                                TextLayout { justify: Justify::Center }
+                                Pickable::IGNORE
+                            ]
                         ]
                     ]
                 ]
@@ -593,6 +666,8 @@ impl Practice {
         let stage = plan.first().copied().unwrap_or(Stage::Pinyin);
         *self = Practice { word, reviewing, plan, dirty: true, started: true, begun: crate::progress::now_unix_seconds(), ..default() };
         self.start_stage(stage, data);
+        // Traced first: the brush writes it before the eyes.
+        self.intro = (stage == Stage::Trace).then_some(0.0);
         self.message = match self.plan.len() {
             n if n >= 8 => format!("A new word: listen, then trace its strokes. {n} writes, then its pinyin."),
             n => format!("Listen, then write it: {n} writes, then its pinyin."),
@@ -610,7 +685,7 @@ impl Practice {
         }
     }
 
-    fn word<'a>(&self, data: &'a HanziData) -> &'a data::Word {
+    pub fn word<'a>(&self, data: &'a HanziData) -> &'a data::Word {
         &data.words[self.word.min(data.words.len() - 1)]
     }
 
@@ -647,6 +722,17 @@ impl Practice {
     /// The looks of the strokes of the current character; without the motion, the glimpse is
     /// the whole stroke at once.
     fn looks(&self, n: usize, motion: bool) -> Vec<Look> {
+        if let Some(t) = self.intro {
+            // The brush writes the strokes in order, in ink; the rest wait as outlines.
+            let at = (t / INTRO_STROKE) as usize;
+            return (0..n)
+                .map(|i| match i.cmp(&at) {
+                    std::cmp::Ordering::Less => Look::Done,
+                    std::cmp::Ordering::Equal => Look::Reveal((t / INTRO_STROKE).fract(), 1.0),
+                    std::cmp::Ordering::Greater => Look::Outline(0.3),
+                })
+                .collect();
+        }
         (0..n)
             .map(|i| {
                 let given = self.stage == Stage::Partial && !taken_out(i, n, self.word + self.parity);
@@ -665,6 +751,34 @@ impl Practice {
                 }
             })
             .collect()
+    }
+
+    /// The brush of the intro, in pixels.
+    fn tip(&self, glyph: &data::Glyph) -> Option<Vec2> {
+        let t = self.intro?;
+        let at = (t / INTRO_STROKE) as usize;
+        render::point_along(glyph.medians.get(at)?, (t / INTRO_STROKE).fract())
+    }
+
+    /// The seconds the intro of the character takes.
+    fn intro_length(&self, data: &HanziData) -> f32 {
+        let n = self.current_char(data).and_then(|c| data.glyph(c)).map_or(0, |g| g.medians.len());
+        n as f32 * INTRO_STROKE + INTRO_END
+    }
+
+    /// The writes of the word as steps, the pinyin the last one.
+    fn steps(&self, data: &HanziData) -> crate::ui::Steps {
+        let total = self.plan.len() + 1;
+        let done = if self.level_done {
+            total as f32
+        } else if self.stage == Stage::Pinyin {
+            self.plan.len() as f32
+        } else {
+            let n_chars = self.word(data).word.chars().count().max(1) as f32;
+            let strokes = self.current_char(data).and_then(|c| data.glyph(c)).map_or(1, |g| g.medians.len()).max(1) as f32;
+            self.step as f32 + (self.char_index as f32 + self.stroke as f32 / strokes) / n_chars
+        };
+        crate::ui::Steps { total, done }
     }
 }
 
@@ -783,21 +897,6 @@ fn show_hint(_: On<Activate>, mut practice: ResMut<Practice>, mut focus: ResMut<
     focus.clear();
 }
 
-fn restart_word(
-    _: On<Activate>,
-    mut practice: ResMut<Practice>,
-    progress: Res<Progress>,
-    data: Res<HanziData>,
-    mut speaker: ResMut<Speaker>,
-    mut focus: ResMut<InputFocus>,
-) {
-    let word = practice.word;
-    let plan = plan_for(&progress, &data, word);
-    practice.begin(word, plan, &data);
-    speaker.say(&data.words[word].word);
-    focus.clear();
-}
-
 fn next_level(_: On<Activate>, mut practice: ResMut<Practice>, mut progress: ResMut<Progress>, data: Res<HanziData>, mut focus: ResMut<InputFocus>) {
     after_level(&mut practice, &mut progress, &data);
     focus.clear();
@@ -862,6 +961,8 @@ fn pen_down(
         return;
     }
     if let Some(p) = canvas_point(press.pointer.position, &window, &canvas) {
+        // The eager hand: the brush stops showing.
+        practice.intro = None;
         practice.ink = vec![p];
         practice.ink_widths.clear();
         if progress.brush {
@@ -948,6 +1049,7 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
             practice.accuracies.push(accuracy);
             let kind = glyph.kinds.get(stroke).map_or("", |k| k.hanzi);
             practice.message = format!("{kind} {accuracy:.0}%, {}.", matcher::accuracy_word(accuracy));
+            practice.tone = Tone::Good;
             if !widths.is_empty() {
                 let target = brush::profile(&glyph.outlines[stroke], &glyph.medians[stroke]);
                 if let Some(advice) = brush::advice(&target, &brush::along(&ink, &widths, 24)) {
@@ -964,6 +1066,7 @@ fn finish_stroke(practice: &mut Practice, data: &HanziData, speaker: &mut Speake
             practice.stage_misses += 1;
             practice.word_misses += 1;
             practice.wrong = Some((ink, WRONG_SECONDS));
+            practice.tone = Tone::Bad;
             practice.message = match outcome {
                 Outcome::Backwards => "The right stroke, drawn backwards: start at its other end.".to_string(),
                 Outcome::OtherStroke(other)
@@ -986,8 +1089,14 @@ fn next_char(practice: &mut Practice, data: &HanziData, speaker: &mut Speaker) {
     practice.stroke = 0;
     practice.skip_given(data);
     if practice.char_index < practice.word(data).word.chars().count() {
+        if practice.step == 0 && practice.stage == Stage::Trace {
+            practice.intro = Some(0.0);
+        }
         return;
     }
+    // The word written: it glows, to sink in, the message green with it.
+    practice.glow = GLOW_SECONDS;
+    practice.tone = Tone::Good;
     // The step is done: again with many misses, else the next one.
     let stage = practice.stage;
     if practice.stage_misses >= MISSES_TO_REPEAT && stage != Stage::Trace {
@@ -999,7 +1108,7 @@ fn next_char(practice: &mut Practice, data: &HanziData, speaker: &mut Speaker) {
     let next = practice.plan.get(practice.step).copied().unwrap_or(Stage::Pinyin);
     practice.start_stage(next, data);
     practice.message = match next {
-        Stage::Pinyin => "Now the pinyin: type it and pick the word.".into(),
+        Stage::Pinyin => "All the writes done!".into(),
         _ => "Well done.".into(),
     };
     // The word is said again when the writes from memory start.
@@ -1011,7 +1120,7 @@ fn next_char(practice: &mut Practice, data: &HanziData, speaker: &mut Speaker) {
 /// The writes of a word for a learner: its own history and the words learned so far.
 fn plan_for(progress: &Progress, data: &HanziData, word: usize) -> Vec<Stage> {
     let learned = progress.hanzi.words.values().filter(|s| s.practiced > 0).count();
-    plan(n_writes(progress.hanzi.words.get(&data.words[word].word), learned))
+    plan(n_writes(progress.hanzi.words.get(&data.words[word].word), learned, progress.hanzi.writes))
 }
 
 /// The keys: the pinyin in its step, Enter for the next level, Space to listen.
@@ -1118,6 +1227,7 @@ fn pick_candidate(practice: &mut Practice, progress: &mut Progress, data: &Hanzi
     if candidate.word != word.word {
         practice.word_misses += 1;
         practice.message = format!("That is {} ({}), not the word: try again.", candidate.word, candidate.pinyin);
+        practice.tone = Tone::Bad;
         let stats = progress.hanzi.words.entry(word.word.clone()).or_default();
         stats.pinyin_misses += 1;
         return;
@@ -1240,6 +1350,7 @@ fn auto_strokes(
             return;
         };
         let stroke = practice.stroke.min(glyph.medians.len() - 1);
+        practice.intro = None;
         practice.ink = glyph.medians[stroke].iter().map(|p| render::to_pixels(*p)).collect();
         // With the brush, as thick as the stroke: its profile.
         if progress.brush {
@@ -1262,8 +1373,19 @@ fn auto_strokes(
     }
 }
 
-fn fade(time: Res<Time>, mut practice: ResMut<Practice>) {
+fn fade(time: Res<Time>, progress: Res<Progress>, data: Res<HanziData>, mut practice: ResMut<Practice>) {
     let dt = time.delta_secs();
+    if let Some(t) = practice.intro {
+        let length = practice.intro_length(&data);
+        practice.intro = (!progress.reduce_motion && t + dt < length).then_some(t + dt);
+        practice.dirty = true;
+    }
+    if practice.glow > 0.0 {
+        practice.glow = (practice.glow - dt).max(0.0);
+        if practice.glow == 0.0 && practice.tone == Tone::Good {
+            practice.tone = Tone::Plain;
+        }
+    }
     if practice.glimpse > 0.0 {
         practice.glimpse = (practice.glimpse - dt).max(0.0);
         practice.dirty = true;
@@ -1292,6 +1414,7 @@ type GuideCache = Option<((usize, usize, usize), brush::Guide)>;
 /// The brush guide is shown: the outline is there to follow, or the glimpse.
 fn shows_guide(practice: &Practice, progress: &Progress) -> bool {
     progress.brush
+        && practice.intro.is_none()
         && !practice.level_done
         && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.glimpse > 0.0 && practice.stage != Stage::Pinyin)
 }
@@ -1348,6 +1471,7 @@ fn draw_canvas(
                 wrong,
                 echo,
                 guide,
+                tip: practice.tip(glyph),
             };
             render::draw(pixmap, glyph, &frame, &colors);
         }
@@ -1367,19 +1491,22 @@ fn update_view(
     progress: Res<Progress>,
     data: Res<HanziData>,
     mut texts: ParamSet<(
-        Query<&mut Text, With<WordText>>,
+        Query<(Entity, &mut Text, &mut TextFont), With<WordText>>,
         Query<&mut Text, With<PinyinText>>,
         Query<&mut Text, With<MeaningText>>,
         Query<&mut Text, With<StageText>>,
-        Query<&mut Text, With<MessageText>>,
-        Query<&mut Text, With<InputText>>,
+        Query<(Entity, &mut Text, &mut TextFont), With<MessageText>>,
+        Query<(Entity, &mut Text), With<InputText>>,
         Query<&mut Text, With<NextLevelCaption>>,
     )>,
     mut panels: ParamSet<(
         Query<&mut Node, With<PinyinPanel>>,
         Query<&mut Node, With<Keypad>>,
         Query<&mut Node, With<NextLevelButton>>,
+        Query<&mut crate::ui::Steps, With<HanziBar>>,
     )>,
+    mut colored: Local<(bool, Tone, bool)>,
+    mut commands: Commands,
 ) {
     if !practice.is_changed() && !progress.is_changed() {
         return;
@@ -1392,55 +1519,68 @@ fn update_view(
             text.0 = value;
         }
     };
-    // The word is hidden while it is written from memory, the pinyin while it is typed.
-    for mut t in &mut texts.p0() {
+    // The word is hidden while it is written from memory, the pinyin while it is typed; after
+    // a write the word glows, bigger and green, then settles.
+    let glowing = practice.glow > 0.0;
+    let swell = 1.0 + 0.2 * (practice.glow / GLOW_SECONDS).clamp(0.0, 1.0).sqrt();
+    for (entity, mut t, mut font) in &mut texts.p0() {
         set(&mut t, if memory { "？".repeat(word.word.chars().count()) } else { word.word.clone() });
+        let size = FontSize::Px((WORD_FONT * swell).round());
+        if font.font_size != size {
+            font.font_size = size;
+        }
+        if colored.0 != glowing {
+            commands.entity(entity).insert(ThemeTextColor(if glowing { tokens::CHAR_CORRECT } else { feathers_tokens::TEXT_MAIN }));
+        }
     }
+    colored.0 = glowing;
     for mut t in &mut texts.p1() {
         set(&mut t, if pinyin_step { "…".into() } else { word.pinyin.clone() });
     }
     for mut t in &mut texts.p2() {
         set(&mut t, word.meaning.clone());
     }
-    // Where the word is in the level shows in the banner when it starts, see `update_banner`.
-    let n_chars = word.word.chars().count();
+    // Where the word is in the level shows in the banner when it starts, see `update_banner`;
+    // the writes in the bar over the drawing.
     let stage = if practice.level_done {
         format!("{}: done", place(&progress, &data, &practice, false))
+    } else if practice.intro.is_some() {
+        "Watch the brush write it, then trace it".to_string()
     } else {
-        let step = if practice.stage == Stage::Pinyin {
-            "Last step".to_string()
-        } else {
-            format!("Write {} of {}", (practice.step + 1).min(practice.plan.len()), practice.plan.len())
-        };
-        format!(
-            "{step}: {}{}",
-            practice.stage.instructions(),
-            if n_chars > 1 && !pinyin_step {
-                format!(" · character {} of {n_chars}", (practice.char_index + 1).min(n_chars))
-            } else {
-                String::new()
-            }
-        )
+        practice.stage.instructions().to_string()
     };
     for mut t in &mut texts.p3() {
         set(&mut t, stage.clone());
     }
-    for mut t in &mut texts.p4() {
+    for (entity, mut t, mut font) in &mut texts.p4() {
         set(&mut t, practice.message.clone());
+        if colored.1 != practice.tone {
+            commands.entity(entity).insert(ThemeTextColor(practice.tone.token()));
+        }
+        // Stronger with the word, then back to its size.
+        let size = FontSize::Px((15.0 * swell).round());
+        if font.font_size != size {
+            font.font_size = size;
+        }
     }
-    let input = if progress.pinyin_keypad {
-        let spelled = if practice.input.is_empty() {
-            String::new()
-        } else {
-            pinyin::t9_spellings(&practice.input).first().map(|s| s.letters.clone()).unwrap_or_else(|| "?".into())
-        };
-        format!("Keys: {}   {spelled}", practice.input)
+    colored.1 = practice.tone;
+    // The field: the letters, the digits of the nine keys with their spelling, or what to do.
+    let empty = practice.input.is_empty();
+    let input = if empty {
+        if progress.pinyin_keypad { "the keys of the pinyin".to_string() } else { "the pinyin".to_string() }
+    } else if progress.pinyin_keypad {
+        let spelled = pinyin::t9_spellings(&practice.input).first().map(|s| s.letters.clone()).unwrap_or_else(|| "?".into());
+        format!("{}  {spelled}", practice.input)
     } else {
-        format!("Pinyin: {}", practice.input)
+        practice.input.clone()
     };
-    for mut t in &mut texts.p5() {
+    for (entity, mut t) in &mut texts.p5() {
         set(&mut t, input.clone());
+        if colored.2 != empty {
+            commands.entity(entity).insert(ThemeTextColor(if empty { feathers_tokens::TEXT_DIM } else { feathers_tokens::TEXT_MAIN }));
+        }
     }
+    colored.2 = empty;
     for mut t in &mut texts.p6() {
         set(&mut t, if progress.hanzi.review { "Back to the level".into() } else { "Next level".into() });
     }
@@ -1453,6 +1593,23 @@ fn update_view(
     }
     for mut node in &mut panels.p2() {
         node.display = show(practice.level_done);
+    }
+    let steps = practice.steps(&data);
+    for mut bar in &mut panels.p3() {
+        if *bar != steps {
+            *bar = steps;
+        }
+    }
+}
+
+/// The caret of the pinyin field blinks.
+fn blink_caret(time: Res<Time<Real>>, mut carets: Query<&mut Node, With<Caret>>) {
+    let on = time.elapsed_secs() % 1.0 < 0.6;
+    for mut node in &mut carets {
+        let display = if on { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
     }
 }
 
@@ -1520,12 +1677,13 @@ fn fit_canvas(
     scale: Res<UiScale>,
     bars: Query<
         (&ComputedNode, &Node),
-        (Or<(With<crate::ui::Toolbar>, With<crate::ui::ActionsBar>)>, Without<CanvasNode>, Without<SideColumn>, Without<DrawingRow>),
+        (Or<(With<crate::ui::Toolbar>, With<crate::ui::ActionsBar>)>, Without<CanvasNode>, Without<SideColumn>, Without<DrawingRow>, Without<HanziBar>),
     >,
     mut nodes: ParamSet<(
         Query<&mut Node, With<CanvasNode>>,
         Query<&mut Node, With<SideColumn>>,
         Query<&mut Node, With<DrawingRow>>,
+        Query<&mut Node, With<HanziBar>>,
     )>,
 ) {
     let size = window.size() / scale.0.max(0.1);
@@ -1561,6 +1719,11 @@ fn fit_canvas(
             node.flex_wrap = wrap;
         }
     }
+    for mut node in &mut nodes.p3() {
+        if node.width != px(canvas) {
+            node.width = px(canvas);
+        }
+    }
 }
 
 /// The kind of the next stroke while the outline is there to follow, and with the brush how to
@@ -1580,14 +1743,21 @@ fn update_kind_text(
         return;
     }
     let glyph = practice.current_char(&data).and_then(|c| data.glyph(c));
-    let visible = !practice.level_done
-        && practice.stage != Stage::Pinyin
-        && (matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.glimpse > 0.0);
+    // The kind of the stroke is a hint: with the outline to follow, or the stroke shown.
+    let kind_shown = matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.glimpse > 0.0;
+    let n_chars = practice.word(&data).word.chars().count();
     let text = match glyph.and_then(|g| g.kinds.get(practice.stroke).map(|k| (k, g.kinds.len()))) {
-        Some((kind, n)) if visible => {
-            let mut text = format!("Stroke {} of {n}: {} {}, {}", practice.stroke + 1, kind.hanzi, kind.pinyin, kind.english);
-            if progress.brush {
-                text.push_str(&format!(".\n{}", kind.brush));
+        Some((kind, n)) if !practice.level_done && practice.stage != Stage::Pinyin && practice.intro.is_none() => {
+            let mut text = String::new();
+            if n_chars > 1 {
+                text.push_str(&format!("Character {} of {n_chars} · ", practice.char_index + 1));
+            }
+            text.push_str(&format!("Stroke {} of {n}", practice.stroke + 1));
+            if kind_shown {
+                text.push_str(&format!(" · {} {}, {}", kind.hanzi, kind.pinyin, kind.english));
+                if progress.brush {
+                    text.push_str(&format!("\n{}", kind.brush));
+                }
             }
             text
         }
@@ -1598,7 +1768,7 @@ fn update_kind_text(
     }
     let fonts = breakdown::Fonts { latin: asset_server.load(bevy::feathers::constants::fonts::REGULAR), cjk: font.0.clone() };
     for entity in &texts {
-        fonts.fill(&mut commands, entity, &text, 15.0, feathers_tokens::TEXT_MAIN);
+        fonts.fill(&mut commands, entity, &text, 14.0, feathers_tokens::TEXT_DIM);
     }
     *shown = Some(text);
 }
@@ -1669,6 +1839,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_new_word_is_written_before_the_eyes_and_the_writes_fill_the_bar() {
+        let data = HanziData::load();
+        let word = data.index_of("人").expect("人");
+        let mut practice = Practice::default();
+        practice.begin(word, plan(4), &data);
+        assert_eq!(practice.intro, Some(0.0));
+        assert_eq!(practice.steps(&data), crate::ui::Steps { total: 5, done: 0.0 });
+        let glyph = data.glyph('人').expect("the glyph");
+        assert!(practice.tip(glyph).is_some());
+        assert!(practice.intro_length(&data) > INTRO_STROKE);
+        assert!(matches!(practice.looks(2, true)[0], Look::Reveal(_, _)));
+        // Not when the word is filled in or written from memory.
+        practice.begin(word, vec![Stage::Partial, Stage::Memory], &data);
+        assert_eq!(practice.intro, None);
+    }
+
+    #[test]
     fn the_steps_of_a_word() {
         let data = HanziData::load();
         let mut practice = Practice::default();
@@ -1705,18 +1892,23 @@ mod tests {
     #[test]
     fn the_writes_taper_as_the_word_and_the_learner_progress() {
         let stats = |practiced, weak| HanziWordStats { practiced, weak, ..default() };
-        assert_eq!(n_writes(None, 0), 10);
-        assert_eq!(n_writes(Some(&stats(1, 0)), 3), 8);
-        assert_eq!(n_writes(Some(&stats(3, 0)), 3), 4);
-        assert_eq!(n_writes(Some(&stats(6, 0)), 3), 2);
+        assert_eq!(n_writes(None, 0, 0), 10);
+        assert_eq!(n_writes(Some(&stats(1, 0)), 3, 0), 8);
+        assert_eq!(n_writes(Some(&stats(3, 0)), 3, 0), 4);
+        assert_eq!(n_writes(Some(&stats(6, 0)), 3, 0), 2);
         // A weak word gets two more, never above the first time.
-        assert_eq!(n_writes(Some(&stats(3, 2)), 3), 6);
-        assert_eq!(n_writes(Some(&stats(0, 2)), 3), 10);
+        assert_eq!(n_writes(Some(&stats(3, 2)), 3, 0), 6);
+        assert_eq!(n_writes(Some(&stats(0, 2)), 3, 0), 10);
         // The learner with words behind.
-        assert_eq!(n_writes(None, 10), 8);
-        assert_eq!(n_writes(None, 30), 6);
-        assert_eq!(n_writes(None, 200), 5);
-        assert_eq!(n_writes(Some(&stats(2, 0)), 200), 2);
+        assert_eq!(n_writes(None, 10, 0), 8);
+        assert_eq!(n_writes(None, 30, 0), 6);
+        assert_eq!(n_writes(None, 200, 0), 5);
+        assert_eq!(n_writes(Some(&stats(2, 0)), 200, 0), 2);
+        // The writes wanted in the settings, a hundred for the keen.
+        assert_eq!(n_writes(None, 200, 100), 100);
+        assert_eq!(n_writes(Some(&stats(1, 0)), 0, 20), 18);
+        assert_eq!(plan(100).len(), 100);
+        assert_eq!(plan(100).iter().filter(|s| **s == Memory).count(), 25);
         // The plans: tracing first, memory last.
         use Stage::*;
         assert_eq!(plan(10), vec![Trace, Trace, Trace, Faded, Faded, Faded, Partial, Partial, Memory, Memory]);

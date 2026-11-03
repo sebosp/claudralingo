@@ -248,6 +248,12 @@ mod snapshot {
         mut keyboard: ResMut<claudralingo::keyboard::KeyboardView>,
         mut panel: ResMut<claudralingo::ui::Panel>,
         layout: Res<claudralingo::game::ActiveLayout>,
+        (progress, hanzi_data, hanzi, pen): (
+            Res<claudralingo::progress::Progress>,
+            Res<claudralingo::hanzi::data::HanziData>,
+            Res<claudralingo::hanzi::Practice>,
+            Res<claudralingo::penmanship::Practice>,
+        ),
     ) {
         *frame += 1;
         let window = *window;
@@ -268,9 +274,18 @@ mod snapshot {
                 *panel = claudralingo::ui::Panel::Lessons;
             } else if std::env::var_os("CLAUDRALINGO_STATS").is_some() {
                 *panel = claudralingo::ui::Panel::Stats;
+            } else if std::env::var_os("CLAUDRALINGO_PRINT").is_some() {
+                *panel = claudralingo::ui::Panel::Print;
             } else if std::env::var_os("CLAUDRALINGO_HELP").is_none() {
                 *panel = claudralingo::ui::Panel::None;
             }
+        }
+        // `CLAUDRALINGO_PDF=page.pdf` writes the printable page of the exercise.
+        if *frame == 50
+            && let Some(path) = std::env::var_os("CLAUDRALINGO_PDF")
+            && let Some(status) = claudralingo::print::save_current(&progress, &hanzi_data, &hanzi, &pen, path.into())
+        {
+            eprintln!("{status}");
         }
         // `CLAUDRALINGO_PREVIEW_LAYER=1` shows a layer as a click on its layer key does.
         if *frame == 50

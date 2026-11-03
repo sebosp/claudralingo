@@ -76,6 +76,9 @@ pub struct Stroke {
     /// In x-heights, upright, the base line at 0.
     pub points: Vec<Vec2>,
     pub dot: bool,
+    /// Where the counts of the 1874 method begin, indices in `points`: the first point, then
+    /// each turn of the movement, the 1-2-3 of the copybooks.
+    pub counts: Vec<usize>,
 }
 
 /// A figure to write: a letter, or a row of a drill.
@@ -93,7 +96,7 @@ impl Figure {
         let m = style.metrics();
         self.strokes
             .iter()
-            .map(|s| Stroke { points: s.points.iter().map(|p| m.shear(m.fit(*p))).collect(), dot: s.dot })
+            .map(|s| Stroke { points: s.points.iter().map(|p| m.shear(m.fit(*p))).collect(), dot: s.dot, counts: s.counts.clone() })
             .collect()
     }
 }
@@ -107,21 +110,42 @@ pub struct Lesson {
 /// The points of a cubic Bézier curve after its start.
 const SAMPLES: usize = 16;
 
-/// Draws a stroke with curves and lines, upright.
+/// Draws a stroke with curves and lines, upright. Each principle (a curve, a straight line, a
+/// loop) is one count, marked where it begins.
 struct Pen {
     points: Vec<Vec2>,
+    counts: Vec<usize>,
 }
 
 impl Pen {
     fn at(x: f32, y: f32) -> Pen {
-        Pen { points: vec![Vec2::new(x, y)] }
+        Pen { points: vec![Vec2::new(x, y)], counts: vec![0] }
     }
 
     fn here(&self) -> Vec2 {
         *self.points.last().expect("a pen has a point")
     }
 
-    fn curve(mut self, c1: (f32, f32), c2: (f32, f32), end: (f32, f32)) -> Pen {
+    /// A count begins here.
+    fn mark(mut self) -> Pen {
+        let at = self.points.len() - 1;
+        if self.counts.last() != Some(&at) {
+            self.counts.push(at);
+        }
+        self
+    }
+
+    /// A straight line, one count.
+    fn line(self, x: f32, y: f32) -> Pen {
+        self.mark().seg_line(x, y)
+    }
+
+    /// A curve, one count.
+    fn curve(self, c1: (f32, f32), c2: (f32, f32), end: (f32, f32)) -> Pen {
+        self.mark().seg_curve(c1, c2, end)
+    }
+
+    fn seg_curve(mut self, c1: (f32, f32), c2: (f32, f32), end: (f32, f32)) -> Pen {
         let (p0, c1, c2, p3) = (self.here(), Vec2::from(c1), Vec2::from(c2), Vec2::from(end));
         for i in 1..=SAMPLES {
             let t = i as f32 / SAMPLES as f32;
@@ -131,7 +155,7 @@ impl Pen {
         self
     }
 
-    fn line(mut self, x: f32, y: f32) -> Pen {
+    fn seg_line(mut self, x: f32, y: f32) -> Pen {
         let (from, to) = (self.here(), Vec2::new(x, y));
         let n = ((to - from).length() * 8.0).ceil().max(1.0) as usize;
         for i in 1..=n {
@@ -145,7 +169,7 @@ impl Pen {
     fn right_curve(self, x: f32, y: f32) -> Pen {
         let a = self.here();
         let d = Vec2::new(x, y) - a;
-        self.curve((a.x + 0.5 * d.x, a.y + 0.04 * d.y), (x - 0.3 * d.x, y - 0.45 * d.y), (x, y))
+        self.mark().seg_curve((a.x + 0.5 * d.x, a.y + 0.04 * d.y), (x - 0.3 * d.x, y - 0.45 * d.y), (x, y))
     }
 
     /// Principle 3, the left curve, up and over to the top of a stem at `x`: it rises first and
@@ -153,19 +177,19 @@ impl Pen {
     fn overturn(self, x: f32, top: f32) -> Pen {
         let a = self.here();
         let d = x - a.x;
-        self.curve((a.x + 0.1 * d, a.y + 0.6 * (top - a.y)), (x - 0.35 * d, top + 0.04), (x, top - 0.2))
+        self.mark().seg_curve((a.x + 0.1 * d, a.y + 0.6 * (top - a.y)), (x - 0.35 * d, top + 0.04), (x, top - 0.2))
     }
 
     /// Principle 1 down to `y`, ending with a short turn into the next upstroke.
     fn down_turn(self, y: f32) -> Pen {
         let x = self.here().x;
-        self.line(x, y + 0.22).curve((x, y + 0.04), (x + 0.06, y), (x + 0.24, y + 0.04))
+        self.mark().seg_line(x, y + 0.22).seg_curve((x, y + 0.04), (x + 0.06, y), (x + 0.24, y + 0.04))
     }
 
     /// Principle 1 down to `y`, an angle at the end.
     fn down(self, y: f32) -> Pen {
         let x = self.here().x;
-        self.line(x, y)
+        self.mark().seg_line(x, y)
     }
 
     /// The oval of a, d, g, q: from the head line at `right`, down the left side and up the
@@ -173,17 +197,19 @@ impl Pen {
     fn oval(self, left: f32, right: f32) -> Pen {
         let a = self.here();
         let mid = 0.5 * (left + right);
-        self.curve((a.x - 0.25, 1.06), (left, 0.85), (left, 0.45))
-            .curve((left, 0.08), (mid - 0.1, -0.03), (mid + 0.05, 0.02))
-            .curve((right - 0.05, 0.08), (right, 0.6), (right, 1.0))
+        self.mark()
+            .seg_curve((a.x - 0.25, 1.06), (left, 0.85), (left, 0.45))
+            .seg_curve((left, 0.08), (mid - 0.1, -0.03), (mid + 0.05, 0.02))
+            .seg_curve((right - 0.05, 0.08), (right, 0.6), (right, 1.0))
     }
 
     /// Principle 4, the extended loop: up to the top line from the base, a short turn and down
     /// on the main slant, crossing the upstroke one space above the base. Ends at the base.
     fn loop_up(self, stem: f32) -> Pen {
         let a = self.here();
-        self.curve((a.x + 0.55, a.y + 0.4), (stem + 0.45, 2.3), (stem + 0.4, 2.8))
-            .curve((stem + 0.35, 3.08), (stem, 3.08), (stem, 2.7))
+        self.mark()
+            .seg_curve((a.x + 0.55, a.y + 0.4), (stem + 0.45, 2.3), (stem + 0.4, 2.8))
+            .seg_curve((stem + 0.35, 3.08), (stem, 3.08), (stem, 2.7))
             .line(stem, 0.0)
     }
 
@@ -192,25 +218,27 @@ impl Pen {
     fn loop_down(self, to: f32) -> Pen {
         let x = self.here().x;
         self.line(x, -1.7)
-            .curve((x, -2.08), (x - 0.4, -2.08), (x - 0.4, -1.8))
-            .curve((x - 0.4, -1.0), (x + 0.1, -0.2), (x + 0.4, 0.2))
-            .curve((x + 0.6, 0.45), (to - 0.3, 0.85), (to, 1.0))
+            .mark()
+            .seg_curve((x, -2.08), (x - 0.4, -2.08), (x - 0.4, -1.8))
+            .seg_curve((x - 0.4, -1.0), (x + 0.1, -0.2), (x + 0.4, 0.2))
+            .seg_curve((x + 0.6, 0.45), (to - 0.3, 0.85), (to, 1.0))
     }
 
     /// The finish of b, o, v, w: a dot and a short curve to the right on the head line.
     fn finish(self) -> Pen {
         let a = self.here();
-        self.curve((a.x - 0.12, a.y - 0.1), (a.x - 0.08, a.y - 0.22), (a.x, a.y - 0.12))
-            .curve((a.x + 0.15, a.y - 0.02), (a.x + 0.35, a.y - 0.05), (a.x + 0.55, a.y - 0.15))
+        self.mark()
+            .seg_curve((a.x - 0.12, a.y - 0.1), (a.x - 0.08, a.y - 0.22), (a.x, a.y - 0.12))
+            .seg_curve((a.x + 0.15, a.y - 0.02), (a.x + 0.35, a.y - 0.05), (a.x + 0.55, a.y - 0.15))
     }
 
     fn done(self) -> Stroke {
-        Stroke { points: self.points, dot: false }
+        Stroke { points: self.points, dot: false, counts: self.counts }
     }
 }
 
 fn dot(x: f32, y: f32) -> Stroke {
-    Stroke { points: vec![Vec2::new(x, y), Vec2::new(x - 0.04, y - 0.06)], dot: true }
+    Stroke { points: vec![Vec2::new(x, y), Vec2::new(x - 0.04, y - 0.06)], dot: true, counts: Vec::new() }
 }
 
 /// The cross of the t, a short line on the head of its stem.
@@ -425,7 +453,7 @@ fn ovals(direct: bool) -> Figure {
                     Vec2::new(cx - 0.5 * a.sin(), 1.0 + a.cos())
                 })
                 .collect();
-            Stroke { points, dot: false }
+            Stroke { points, dot: false, counts: vec![0] }
         })
         .collect();
     if direct {
@@ -480,6 +508,22 @@ pub fn lessons() -> Vec<Lesson> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_counts_begin_at_the_start_and_at_the_turns() {
+        let push_pull = &push_pulls().strokes[0];
+        // Up, then down: the 1 at the base, the 2 at the head line.
+        assert_eq!(push_pull.counts.len(), 2);
+        assert_eq!(push_pull.points[push_pull.counts[0]].y, 0.0);
+        assert_eq!(push_pull.points[push_pull.counts[1]].y, 1.0);
+        // The i: right curve, straight down, right curve · 1-2-3.
+        let i = letter('i');
+        assert_eq!(i.strokes[0].counts.len(), 3, "{:?}", i.strokes[0].counts);
+        for stroke in lessons().iter().flat_map(|l| &l.figures).flat_map(|f| &f.strokes) {
+            assert!(stroke.counts.iter().all(|c| *c < stroke.points.len()));
+            assert!(stroke.counts.windows(2).all(|w| w[0] < w[1]));
+        }
+    }
 
     #[test]
     fn every_lesson_has_figures_with_strokes() {
