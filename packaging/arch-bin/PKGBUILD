@@ -2,7 +2,7 @@
 # The binary package of the AUR: the Linux build of a GitHub release, nothing compiled. Update
 # pkgver and the sha256sums (updpkgsums) for each release `v<pkgver>`.
 pkgname=claudralingo-bin
-pkgver=0.2.1
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Touch typing tutor for split keyboards (Corne, Lily58, ZMK keymaps) and HSK hanzi, made with Bevy"
 arch=('x86_64')
@@ -13,7 +13,7 @@ provides=('claudralingo')
 conflicts=('claudralingo')
 options=('!strip' '!debug')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/claudralingo-linux-x86_64.tar.gz")
-sha256sums=('8700cf1931859a6328ebc6e290353dfa56b3d28e8bb6a836a4bb1e5bb8c174d4')
+sha256sums=('7802ee30b5dd9f10c8ccaa2e6804329090fd8a6e65e13249531503155527062a')
 
 package() {
   cd claudralingo-linux-x86_64
