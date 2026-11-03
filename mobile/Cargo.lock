@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "claudralingo"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "chrono",
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "claudralingo_mobile"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "claudralingo",
