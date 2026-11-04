@@ -74,7 +74,7 @@ struct SummaryTitle;
 #[derive(Component, Default, Clone)]
 struct AccuracyText;
 #[derive(Component, Default, Clone)]
-struct VerdictText;
+pub struct VerdictText;
 #[derive(Component, Default, Clone)]
 struct RecordText;
 
@@ -554,7 +554,7 @@ fn root(
                     }
                     ShortcutsRoot
                     --
-                    // The summary at the end: how it went, where Enter goes, the tip.
+                    // The summary at the end: how it went, where Enter goes, the keys to focus on.
                     @group()
                     Node {
                         display: Display::None,
@@ -2597,7 +2597,7 @@ fn update_message(
     let summary = if progress.mode.is_typing() {
         summary(&exercise)
     } else {
-        Summary { title: "Round done".into(), tone: feathers_tokens::TEXT_MAIN, accuracy: None, verdict: None, record: None, tip: drill.summary.clone() }
+        Summary { title: "Round done".into(), tone: feathers_tokens::TEXT_MAIN, accuracy: None, verdict: None, record: None, notes: drill.summary.clone() }
     };
     let set = |text: &mut Text, value: &str| {
         if text.0 != value {
@@ -2631,8 +2631,8 @@ fn update_message(
         show(&mut node, summary.record.is_some());
     }
     for (mut text, mut node) in &mut texts.p4() {
-        set(&mut text, &summary.tip);
-        show(&mut node, !summary.tip.is_empty());
+        set(&mut text, &summary.notes);
+        show(&mut node, !summary.notes.is_empty());
     }
 }
 
@@ -2648,13 +2648,13 @@ struct Summary {
     /// Where Enter goes: on to the next lesson in green, the same one again in amber.
     verdict: Option<(String, bevy::feathers::theme::ThemeToken)>,
     record: Option<String>,
-    /// Klavaro's comment as a tip, and the reason of the suggested drill.
-    tip: String,
+    /// The keys to focus on, and the reason of the suggested drill.
+    notes: String,
 }
 
 impl Default for Summary {
     fn default() -> Self {
-        Summary { title: String::new(), tone: feathers_tokens::TEXT_MAIN, accuracy: None, verdict: None, record: None, tip: String::new() }
+        Summary { title: String::new(), tone: feathers_tokens::TEXT_MAIN, accuracy: None, verdict: None, record: None, notes: String::new() }
     }
 }
 
@@ -2703,21 +2703,11 @@ fn summary(exercise: &Exercise) -> Summary {
         }
     };
     let tone = if passed { tokens::CHAR_CORRECT } else { tokens::NEAR_MISS };
-    // The numbers are in the bar at the top, the keys in the verdict: the advice only.
-    let mut lines: Vec<String> = exercise
-        .message
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.contains("Press Enter") && !l.contains("Backspace") && *l != ":-(")
-        .map(str::to_string)
-        .collect();
-    if let Some(first) = lines.first_mut() {
-        *first = format!("Tip: {first}");
-    }
+    let mut lines: Vec<String> = exercise.message.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
     if let Some((_, reason)) = &exercise.suggestion {
         lines.push(capitalize(reason));
     }
-    Summary { title, tone: tone.clone(), accuracy: Some(accuracy), verdict: Some((verdict, tone)), record: exercise.record.clone(), tip: lines.join("\n") }
+    Summary { title, tone: tone.clone(), accuracy: Some(accuracy), verdict: Some((verdict, tone)), record: exercise.record.clone(), notes: lines.join("\n") }
 }
 
 /// ▲ better than the last time of the lesson, ▼ worse, ● the same, in words too.
@@ -2769,7 +2759,6 @@ fn update_actions(
     mut labels: Query<&mut Text, With<ActionsText>>,
 ) {
     let rested = last.idle(&time) >= REST_SECONDS;
-    let ended = exercise.tutor.query == TutorQuery::End;
     let mut actions: Vec<String> = Vec::new();
     match progress.mode {
         ExerciseMode::Hanzi => {
@@ -2791,31 +2780,9 @@ fn update_actions(
                 actions.push("Esc, the arrows and the shortcuts are the drill".into());
             }
         }
-        _ if ended => {
-            if rested {
-                let passed = exercise.tutor.results.is_some_and(|r| r.accuracy >= crate::game::goal(exercise.mode));
-                let next_finger = (exercise.mode == ExerciseMode::Fingers && passed).then(|| crate::drills::next_finger(exercise.finger)).flatten();
-                actions.push(match next_finger {
-                    Some(finger) => format!("Enter {} drill", finger_name(finger)),
-                    None => "Enter next exercise".into(),
-                });
-                if exercise.mode == ExerciseMode::Basic {
-                    actions.push("Backspace previous lesson".into());
-                }
-                if let Some((finger, _)) = &exercise.suggestion {
-                    actions.push(format!("Tab {} drill", finger_name(*finger)));
-                }
-            }
-            actions.push("← → lessons".into());
-        }
-        _ if exercise.tutor.query == TutorQuery::Start => {
-            actions.push("← → lessons".into());
-            actions.push("Ctrl+Backspace clear the errors".into());
-        }
-        _ => {
-            actions.push("‹ › lessons".into());
-            actions.push("Ctrl+Backspace clear the errors".into());
-        }
+        // The summary tells where Enter goes.
+        _ if exercise.tutor.query == TutorQuery::End => {}
+        _ => actions.push("Ctrl+Backspace clear the errors".into()),
     }
     let text = actions.join("   ·   ");
     for mut label in &mut labels {

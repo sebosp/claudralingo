@@ -74,24 +74,3 @@ pub fn create_word(grid: &KbdGrid) -> Vec<char> {
 pub fn create_number() -> Vec<char> {
     (0..4).map(|_| char::from(b'0' + rand_below(10) as u8)).collect()
 }
-
-/// `adapt_comment`, the levels of `tutor_init_goals`.
-pub fn comment(accuracy: f64) -> String {
-    if accuracy < 50.0 {
-        ":-(".into()
-    } else if accuracy < 90.0 {
-        "Your accuracy rate is below 90%...\nCould you please try again to improve it?".into()
-    } else if accuracy < 95.0 {
-        "You are doing well. But...\nCould you make the accuracy reach 95%?".into()
-    } else if accuracy < GOAL_ACCURACY {
-        format!(
-            "You are almost there, but your accuracy rate is still below {GOAL_ACCURACY:.0}%.\n\
-             Try a few more times, or maybe you're getting upset, so go to another kind of exercise."
-        )
-    } else {
-        format!(
-            "Very good!\nYou succeeded with an accuracy rate above {GOAL_ACCURACY:.0}%.\n\
-             Now it is time to increase your velocity.\nGo to the velocity exercises."
-        )
-    }
-}

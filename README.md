@@ -63,9 +63,10 @@ exercises without lessons. Then the icons: the circling arrow (F5) starts the te
 the figure again, the notebook opens the lessons and the bars the stats (those of the first
 menu), the gear the settings, `?` the help. The app opens on the exercise of the last session.
 
-The bar at the bottom shows the keys of the moment. The key to go on with once an exercise is
-done (Enter) appears after a pause of five seconds: whoever knows it has pressed it by then. The
-help (`?` or F1) lists every shortcut.
+The bar at the bottom shows the keys of the moment. At the end of a typing exercise it is empty,
+the summary says where Enter goes; in the hanzi and the penmanship the key to go on with appears
+after a pause of five seconds: whoever knows it has pressed it by then. The help (`?` or F1) lists
+every shortcut.
 
 The setting "Hide the toolbar" puts it over the top of the window, it shows when the pointer goes
 to the top or touches it; F11 is the full screen, the toolbar hides there too. Zoomed in, the
@@ -98,7 +99,7 @@ Differences to Klavaro:
   Klavaro. A basic lesson at 95% or more unlocks the next one by itself, as in Klavaro.
 - The end of an exercise shows how it went: fireworks for a perfect one, sparkles when the goal is
   reached, and when it is not, the most missed keys red and breathing on the keyboard (with their
-  characters, on any layer) until the next exercise, named in the comment too. Reduce motion
+  characters, on any layer) until the next exercise, named in the summary too. Reduce motion
   keeps the red keys still and skips the fireworks.
 
 The basic lessons are masks over the 4x14 key grid of Klavaro's `qwerty_us.kbd`, their characters
@@ -269,9 +270,8 @@ words per minute, the accuracy and the fluidness, with ▲ (better), ▼ (worse)
 against the last time of the same lesson. Under it the summary: "Lesson 7 complete" or "Lesson
 7: below the goal", the accuracy against the goal, then where Enter goes, green when it goes on
 to the next lesson or the next finger, amber when it repeats the same one; a new best speed for
-the lesson is congratulated in green with the gain and the date of the previous record, and
-Klavaro's comment comes as a tip. The keys of the moment (Enter, Backspace, Tab,
-← → for the lessons) are in the bar at the bottom. The arrows change the lesson only before the
+the lesson is congratulated in green with the gain and the date of the previous record. The keys
+of the moment are in the help (F1): Enter, Backspace, Tab, ← → for the lessons. The arrows change the lesson only before the
 first key and at the end: hit by mistake in the middle of an exercise (they sit under the letters
 on the small keyboards) they would throw it away; the ‹ › buttons work at any time.
 

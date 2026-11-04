@@ -138,25 +138,6 @@ pub fn draw_bounce(layout: &Layout, left: bool) -> String {
     text
 }
 
-pub fn bounce_comment(accuracy: f64) -> String {
-    if accuracy < GOAL_ACCURACY {
-        "Slow down: the middle finger stays on its column, the index visits every row.\nPress Enter to bounce again.".into()
-    } else {
-        "Clean bounces! The speed is lower with the alternating case, that is expected.\nPress Enter to bounce again, ‹ › for the other hand.".into()
-    }
-}
-
-pub fn comment(accuracy: f64, finger_number: u8) -> String {
-    let finger = crate::layout::finger_name(finger_number);
-    if accuracy < GOAL_ACCURACY {
-        format!("Keep the other fingers on the home row, only the {finger} moves.\nPress Enter to repeat the drill.")
-    } else if let Some(next) = next_finger(finger_number) {
-        format!("Your {finger} knows its keys!\nPress Enter for the {} drill, or pick another finger with ‹ ›.", crate::layout::finger_name(next))
-    } else {
-        format!("Your {finger} knows its keys, every finger has had its drill!\nPress Enter for another drill, or pick another finger with ‹ ›.")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

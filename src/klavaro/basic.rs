@@ -87,18 +87,6 @@ pub fn draw_lesson(char_set: &[char]) -> String {
     text
 }
 
-/// `basic_comment`
-pub fn comment(accuracy: f64, lesson: usize) -> &'static str {
-    if accuracy < GOAL_ACCURACY {
-        ":-(\nPress Enter to repeat the lesson, Backspace to go back one lesson."
-    } else if lesson >= N_BASIC_LESSONS {
-        "Positions of keys seems to be learned!\nCongratulations! You have accomplished the \
-         entire basic course.\nGo to the next type of exercise: adaptability."
-    } else {
-        "All right, now you got it!\nPress Enter to go to the next lesson."
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

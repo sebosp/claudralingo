@@ -43,7 +43,7 @@ pub struct Exercise {
     pub char_set: Vec<char>,
     /// The misses of this exercise per expected character.
     pub misses: BTreeMap<char, u32>,
-    /// Klavaro's comment at the end of the exercise, the tip of the summary.
+    /// The notes of the summary at the end of the exercise: the keys to focus on, a session not logged.
     pub message: String,
     /// "New record!", faster than the best time of the lesson.
     pub record: Option<String>,
@@ -620,45 +620,26 @@ fn suggest(exercise: &Exercise, progress: &mut Progress, layout: &Layout) -> Opt
         .then(|| (finger, format!("your weakest finger is the {} at {accuracy:.0}%", finger_name(finger))))
 }
 
-/// The end of an exercise: the comment, the lesson to go on with, the session logged. The
+/// The end of an exercise: the notes, the lesson to go on with, the session logged. The
 /// caller saves the progress.
 fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
     let Some(results) = exercise.tutor.results else {
         return;
     };
     let mode = exercise.mode;
-    exercise.message = match mode {
-        ExerciseMode::Basic | ExerciseMode::Layers => {
-            klavaro::basic::comment(results.accuracy, exercise.lesson).to_string()
-        }
-        ExerciseMode::Review => {
-            let keys: String = exercise.char_set.iter().collect();
-            format!("Warm-up done on {keys}. Enter goes on with the session.")
-        }
-        ExerciseMode::Adaptability => klavaro::adaptability::comment(results.accuracy),
-        ExerciseMode::Velocity => klavaro::velocity::comment(results.accuracy, results.velocity),
-        ExerciseMode::Fluidness => {
-            let mut comment =
-                klavaro::fluidness::comment(results.accuracy, results.velocity, results.fluidness);
-            if results.n_touchs < klavaro::tutor::MIN_CHARS_TO_LOG {
-                comment.push_str(&format!(
-                    "\nps.: logging not performed for this session: the number of typed \
-                     characters ({}) must be greater than {}.",
-                    results.n_touchs,
-                    klavaro::tutor::MIN_CHARS_TO_LOG
-                ));
-            }
-            comment
-        }
-        ExerciseMode::Fingers => crate::drills::comment(results.accuracy, exercise.finger),
-        ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::bounce_comment(results.accuracy),
-        ExerciseMode::Custom => {
-            // The next part comes with the next exercise, the last one goes back to the first.
-            progress.pasted_part += 1;
-            "On to the next part of your text.".into()
-        }
-        ExerciseMode::Shortcuts | ExerciseMode::Hanzi | ExerciseMode::Penmanship => String::new(),
+    exercise.message = if mode == ExerciseMode::Fluidness && results.n_touchs < klavaro::tutor::MIN_CHARS_TO_LOG {
+        format!(
+            "This session is not logged: the number of typed characters ({}) must be greater than {}.",
+            results.n_touchs,
+            klavaro::tutor::MIN_CHARS_TO_LOG
+        )
+    } else {
+        String::new()
     };
+    if mode == ExerciseMode::Custom {
+        // The next part comes with the next exercise, the last one goes back to the first.
+        progress.pasted_part += 1;
+    }
     exercise.suggestion = suggest(exercise, progress, layout);
     if results.accuracy < goal(mode) {
         let mut missed: Vec<(char, u32)> = exercise.misses.iter().map(|(c, n)| (*c, *n)).collect();

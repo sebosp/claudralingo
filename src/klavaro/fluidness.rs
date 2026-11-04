@@ -32,29 +32,3 @@ pub fn draw_random_paragraphs() -> String {
     }
     text
 }
-
-/// `fluid_comment`, the levels of `tutor_init_goals`.
-pub fn comment(accuracy: f64, speed: f64, fluidness: f64) -> String {
-    if accuracy < GOAL_ACCURACY {
-        ":-(".into()
-    } else if speed < GOAL_SPEED {
-        format!("You type accurately but not so fast.\nCan you reach {GOAL_SPEED:.0} WPM?")
-    } else if fluidness < 60.0 {
-        "Your rhythm is not so constant. Calm down.\nFor now, try to make the fluidness greater \
-         than 60%."
-            .into()
-    } else if fluidness < GOAL_FLUIDITY {
-        format!(
-            "You are almost getting there. Type more fluently.\nI want a fluidness greater than \
-             {GOAL_FLUIDITY:.0}%."
-        )
-    } else if speed < 90.0 {
-        "Congratulations!\nIt seems to me that you are a professional.\nYou don't need this \
-         program (me) anymore.\nHope you have enjoyed. Thanks and be happy!"
-            .into()
-    } else {
-        "How can you type so fast?\nYou have exceeded all my expectations.\nAre you a machine? \
-         Could you teach me?\nI can not help you anymore. Go to an expert!"
-            .into()
-    }
-}
