@@ -128,6 +128,21 @@ impl Tutor {
         }
     }
 
+    /// The first character waiting to be erased: a wrong key moves on, the text stays red until
+    /// backspace comes back to it.
+    pub fn first_to_erase(&self) -> Option<usize> {
+        if self.retro_pos == 0 {
+            return None;
+        }
+        self.states.iter().position(|s| *s == CharState::Wrong)
+    }
+
+    /// The characters before `end` are done with: the cursor went past them and backspace will
+    /// not come back to them.
+    pub fn is_done_before(&self, end: usize) -> bool {
+        self.query == Query::End || (self.retro_pos == 0 && self.cursor >= end)
+    }
+
     /// The elapsed time since the first touch.
     pub fn elapsed(&self, now: f64) -> f64 {
         match (self.query, self.results) {
@@ -333,6 +348,24 @@ mod tests {
             last = tutor.process_touch(c, *t, accur, &grid);
         }
         last
+    }
+
+    #[test]
+    fn a_wrong_line_end_is_not_done_until_it_is_fixed() {
+        let mut tutor = Tutor::new("fj\u{b6}\nfj\u{b6}\n");
+        let mut accur = Accuracy::default();
+        let mut t = 0.0;
+        // Space instead of Enter: the cursor is on the next line, the red ¶ behind it.
+        type_str(&mut tutor, "fj ", &mut t, &mut accur);
+        assert_eq!(tutor.cursor, 4);
+        assert_eq!(tutor.first_to_erase(), Some(2));
+        assert!(!tutor.is_done_before(3));
+        type_str(&mut tutor, &BACKSPACE.to_string(), &mut t, &mut accur);
+        assert_eq!(tutor.cursor, 2);
+        assert_eq!(tutor.first_to_erase(), None);
+        assert!(!tutor.is_done_before(3));
+        type_str(&mut tutor, "\u{b6}", &mut t, &mut accur);
+        assert!(tutor.is_done_before(3));
     }
 
     #[test]

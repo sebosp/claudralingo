@@ -184,6 +184,22 @@ fn rebuild_prompt(
     }
 }
 
+/// The line of a character, the last one for what is after the text.
+fn line_of(lines: &[(Entity, usize, usize)], index: usize) -> usize {
+    lines.iter().position(|(_, start, end)| (*start..*end).contains(&index)).unwrap_or(lines.len().saturating_sub(1))
+}
+
+/// The line to show the others around: the one of the cursor, or while there are errors to
+/// erase the one of the first of them, a wrong key at the end of a line must not scroll it away.
+/// Typing on and on past the lines shown, the cursor stays on the screen.
+fn shown_line(lines: &[(Entity, usize, usize)], tutor: &crate::klavaro::tutor::Tutor) -> usize {
+    let cursor = line_of(lines, tutor.cursor);
+    match tutor.first_to_erase() {
+        Some(wrong) => line_of(lines, wrong).max(cursor.saturating_sub(LINES_AFTER)),
+        None => cursor,
+    }
+}
+
 fn update_prompt(exercise: Res<Exercise>, mut view: ResMut<PromptView>, mut nodes: Query<&mut Node, With<PromptLine>>, mut commands: Commands) {
     let tutor = &exercise.tutor;
     if view.shown.len() != tutor.states.len() {
@@ -210,12 +226,7 @@ fn update_prompt(exercise: Res<Exercise>, mut view: ResMut<PromptView>, mut node
         }
         view.cursor = cursor;
     }
-    // Show the lines around the cursor.
-    let line = view
-        .lines
-        .iter()
-        .position(|(_, start, end)| (*start..*end).contains(&tutor.cursor))
-        .unwrap_or(view.lines.len().saturating_sub(1));
+    let line = shown_line(&view.lines, tutor);
     if view.visible_line != Some(line) {
         view.visible_line = Some(line);
         for (i, (entity, _, _)) in view.lines.iter().enumerate() {
@@ -230,6 +241,40 @@ fn update_prompt(exercise: Res<Exercise>, mut view: ResMut<PromptView>, mut node
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lines_wait_for_the_errors() {
+        use crate::klavaro::BACKSPACE;
+        use crate::klavaro::accuracy::Accuracy;
+        use crate::klavaro::tutor::Tutor;
+        let text = "fj\u{b6}\n".repeat(6);
+        let mut tutor = Tutor::new(&text);
+        let lines: Vec<(Entity, usize, usize)> =
+            wrap(&tutor.text, MAX_COLUMNS).into_iter().map(|(start, end)| (Entity::PLACEHOLDER, start, end)).collect();
+        let grid = crate::klavaro::KbdGrid::qwerty_us();
+        let mut accur = Accuracy::default();
+        let mut t = 0.0;
+        let mut press = |tutor: &mut Tutor, keys: &str| {
+            for c in keys.chars() {
+                t += 0.2;
+                tutor.process_touch(c, t, &mut accur, &grid);
+            }
+        };
+        press(&mut tutor, "fj\u{b6}fj");
+        assert_eq!(shown_line(&lines, &tutor), 1);
+        // Space instead of Enter on the second line: the view stays there.
+        press(&mut tutor, " ");
+        assert_eq!(line_of(&lines, tutor.cursor), 2);
+        assert_eq!(shown_line(&lines, &tutor), 1);
+        // Typing on past the lines shown, the cursor stays visible.
+        press(&mut tutor, "xxxxxxxxx");
+        assert_eq!(line_of(&lines, tutor.cursor), 5);
+        assert_eq!(shown_line(&lines, &tutor), 3);
+        // Everything erased, back to the line of the cursor.
+        press(&mut tutor, &BACKSPACE.to_string().repeat(10));
+        assert_eq!(tutor.retro_pos, 0);
+        assert_eq!(shown_line(&lines, &tutor), 1);
+    }
 
     #[test]
     fn wrap_after_spaces() {

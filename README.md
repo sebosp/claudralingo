@@ -273,7 +273,8 @@ to the next lesson or the next finger, amber when it repeats the same one; a new
 the lesson is congratulated in green with the gain and the date of the previous record. The keys
 of the moment are in the help (F1): Enter, Backspace, Tab, ← → for the lessons. The arrows change the lesson only before the
 first key and at the end: hit by mistake in the middle of an exercise (they sit under the letters
-on the small keyboards) they would throw it away; the ‹ › buttons work at any time.
+on the small keyboards) they would throw it away; the ‹ › buttons work at any time. While a wrong key waits for Backspace the line
+of the first error stays on the screen, also a wrong key on the ¶ at its end: it neither scrolls away nor closes.
 
 ## Lessons
 

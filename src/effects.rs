@@ -277,7 +277,8 @@ fn celebrate(
     }
 }
 
-/// The lines typed without an error, once the cursor left them.
+/// The lines typed without an error, once the cursor left them and no error of theirs waits for
+/// backspace: a closed line would hide the red character and the cursor coming back to it.
 #[allow(clippy::too_many_arguments)]
 fn detect_row_clears(
     exercise: Res<Exercise>,
@@ -297,7 +298,7 @@ fn detect_row_clears(
     }
     let ended = tutor.query == TutorQuery::End;
     for (i, (entity, start, end)) in prompt.lines().iter().enumerate() {
-        if cleared.1[i] || !(ended || tutor.cursor >= *end) {
+        if cleared.1[i] || !tutor.is_done_before(*end) {
             continue;
         }
         cleared.1[i] = true;
