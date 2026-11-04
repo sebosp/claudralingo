@@ -2,6 +2,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use bevy::prelude::*;
+use bevy::render::{
+    RenderPlugin,
+    settings::{PowerPreference, WgpuSettings},
+};
 use claudralingo::ClaudralingoPlugin;
 
 fn main() {
@@ -10,20 +14,36 @@ fn main() {
         // SAFETY: before any thread is started.
         unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
     }
+    #[cfg(target_os = "linux")]
+    leave_nvidia_asleep();
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Claudralingo".into(),
-            // The app id of Wayland and the class of X11, as the desktop file.
-            name: Some("claudralingo".into()),
-            resolution: (1280, 880).into(),
-            // The web build fills the page, see index.html.
-            canvas: Some("#claudralingo".into()),
-            fit_canvas_to_parent: true,
-            ..default()
-        }),
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Claudralingo".into(),
+                    // The app id of Wayland and the class of X11, as the desktop file.
+                    name: Some("claudralingo".into()),
+                    resolution: (1280, 880).into(),
+                    // The web build fills the page, see index.html.
+                    canvas: Some("#claudralingo".into()),
+                    fit_canvas_to_parent: true,
+                    ..default()
+                }),
+                ..default()
+            })
+            .set(RenderPlugin {
+                // The integrated GPU: a discrete one awake costs a laptop about 20 W, and nothing
+                // here needs it. `WGPU_POWER_PREF=high` still picks the discrete one.
+                render_creation: WgpuSettings {
+                    power_preference: PowerPreference::from_env()
+                        .unwrap_or(PowerPreference::LowPower),
+                    ..default()
+                }
+                .into(),
+                ..default()
+            }),
+    )
     .add_plugins(ClaudralingoPlugin);
     #[cfg(not(target_arch = "wasm32"))]
     snapshot::add(&mut app);
@@ -32,6 +52,41 @@ fn main() {
         app.add_systems(Update, log_input);
     }
     app.run();
+}
+
+/// Keeps a discrete NVIDIA GPU asleep when another GPU can draw: the Vulkan loader starts every
+/// driver to list the GPUs, and the NVIDIA one stays awake (about 20 W on a laptop) even with the
+/// integrated GPU picked. `WGPU_POWER_PREF=high` or any choice of Vulkan driver in the environment
+/// keeps all of them.
+#[cfg(target_os = "linux")]
+fn leave_nvidia_asleep() {
+    let chosen = ["VK_LOADER_DRIVERS_DISABLE", "VK_LOADER_DRIVERS_SELECT", "VK_DRIVER_FILES", "VK_ICD_FILENAMES"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some());
+    if chosen || std::env::var("WGPU_POWER_PREF").is_ok_and(|pref| pref == "high") {
+        return;
+    }
+    let vendors: Vec<String> = std::fs::read_dir("/sys/class/drm")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|card| std::fs::read_to_string(card.path().join("device/vendor")).ok())
+        .map(|vendor| vendor.trim().to_string())
+        .collect();
+    let drivers: Vec<String> = ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d"]
+        .iter()
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flatten()
+        .flatten()
+        .map(|driver| driver.file_name().to_string_lossy().to_string())
+        .collect();
+    let has_driver = |name: &str| drivers.iter().any(|driver| driver.contains(name));
+    let another_can_draw = vendors.iter().any(|vendor| vendor == "0x1002") && has_driver("radeon")
+        || vendors.iter().any(|vendor| vendor == "0x8086") && has_driver("intel");
+    if vendors.iter().any(|vendor| vendor == "0x10de") && another_can_draw {
+        // SAFETY: before any thread is started.
+        unsafe { std::env::set_var("VK_LOADER_DRIVERS_DISABLE", "*nvidia*") };
+    }
 }
 
 /// The pens through XWayland: the Wayland backend of winit 0.30 has no tablet support, KDE sends
