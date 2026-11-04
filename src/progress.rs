@@ -1,6 +1,7 @@
 //! The progress file: the settings, the misses and the touch times per key and the best keys.
 //!
-//! Native builds save to `~/.config/claudralingo/progress.json` (or `$XDG_CONFIG_HOME`), the web
+//! Native builds save to `~/.config/claudralingo/progress.json` (or `$XDG_CONFIG_HOME`,
+//! `%APPDATA%\claudralingo` on Windows), the web
 //! build to the `localStorage` of the browser.
 use std::collections::BTreeMap;
 
@@ -495,6 +496,11 @@ mod storage {
         #[cfg(target_os = "ios")]
         {
             return std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/claudralingo"));
+        }
+        // `%APPDATA%\claudralingo` on Windows, where HOME is not set.
+        #[cfg(windows)]
+        {
+            return std::env::var_os("APPDATA").map(|appdata| PathBuf::from(appdata).join("claudralingo"));
         }
         #[allow(unreachable_code)]
         let base = std::env::var_os("XDG_CONFIG_HOME")

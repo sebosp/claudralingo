@@ -549,10 +549,10 @@ fn rows_more(_: On<Activate>, mut setup: ResMut<PrintSetup>, mut focus: ResMut<I
     focus.clear();
 }
 
-/// Where the PDFs go: the Downloads folder, else the home.
+/// Where the PDFs go: the Downloads folder, else the home (`%USERPROFILE%` on Windows).
 #[cfg(not(target_arch = "wasm32"))]
 fn pdf_dir() -> Option<std::path::PathBuf> {
-    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?);
     let downloads = home.join("Downloads");
     Some(if downloads.is_dir() { downloads } else { home })
 }

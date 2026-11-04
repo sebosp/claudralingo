@@ -1,3 +1,6 @@
+// No console window behind the game on Windows (the release builds, the debug ones keep the logs).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use bevy::prelude::*;
 use claudralingo::ClaudralingoPlugin;
 

@@ -11,7 +11,8 @@ progress stays in the browser.
 | Linux x86_64    | `claudralingo-linux-x86_64.tar.gz` of the [releases](https://github.com/sebosp/claudralingo/releases), or the Arch packages, see [Install on Arch Linux](#install-on-arch-linux) |
 | Android (arm64) | `claudralingo-android-arm64.apk` of the releases (a debug signature: allow the unknown source)                     |
 | iOS             | the simulator build of the releases; a device needs an Apple signing identity, the project is in `mobile/`          |
-| Windows, macOS  | from the sources with cargo, see [Build](#build); no build is published yet                                         |
+| Windows x86_64  | `claudralingo-windows-x86_64-setup.exe` of the releases, an installer (unsigned: Windows asks to confirm the unknown publisher) |
+| macOS           | from the sources with cargo, see [Build](#build); no build is published yet                                         |
 
 ## Screenshots
 
@@ -433,7 +434,7 @@ fonts. The browser build shows the preview but cannot save files yet.
 ## Progress
 
 Native builds save the progress to `~/.config/claudralingo/progress.json` (`$XDG_CONFIG_HOME` if
-set), the browser to its `localStorage` (key `claudralingo.progress`, compact JSON). The progress
+set, `%APPDATA%\claudralingo` on Windows), the browser to its `localStorage` (key `claudralingo.progress`, compact JSON). The progress
 is saved at the end of every exercise and every 5 seconds after a change, a closed browser tab
 loses at most those seconds; the last 5000 sessions are kept per layout. Per layout:
 

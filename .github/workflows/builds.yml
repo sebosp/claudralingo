@@ -1,5 +1,5 @@
-# The native builds of the game: Linux, an Android APK and an iOS app for the simulator, kept
-# as artifacts of the run, attached to a release for the tags `v*`. Pull requests to main run
+# The native builds of the game: Linux, a Windows installer, an Android APK and an iOS app for
+# the simulator, kept as artifacts of the run, attached to a release for the tags `v*`. Pull requests to main run
 # them too, as a check.
 name: Builds
 
@@ -45,6 +45,27 @@ jobs:
         with:
           name: claudralingo-linux-x86_64
           path: claudralingo-linux-x86_64.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The tests run on Linux; .cargo/config.toml only sets mold for the Linux target.
+      - name: Build
+        run: cargo build --release
+      # Inno Setup comes with the runner image, the version is the one of Cargo.toml.
+      - name: Installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging\windows\claudralingo.iss
+          Get-Item claudralingo-windows-x86_64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claudralingo-windows-x86_64
+          path: claudralingo-windows-x86_64-setup.exe
 
   android:
     runs-on: ubuntu-latest
@@ -118,7 +139,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, android, ios]
+    needs: [linux, windows, android, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -128,5 +149,6 @@ jobs:
         with:
           files: |
             claudralingo-linux-x86_64.tar.gz
+            claudralingo-windows-x86_64-setup.exe
             claudralingo-android-arm64.apk
             claudralingo-ios-simulator.zip
