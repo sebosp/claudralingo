@@ -72,6 +72,7 @@ pub mod tokens {
     /// The headings of the help, at least 4.5:1 on the panels.
     pub const HEADING: ThemeToken = ThemeToken::new_static("claudralingo.heading");
     /// The grades of the lessons: green, purple, gold, see [`crate::lessons::Grade`].
+    pub const GRADE_STARTED: ThemeToken = ThemeToken::new_static("claudralingo.grade.started");
     pub const GRADE_GOOD: ThemeToken = ThemeToken::new_static("claudralingo.grade.good");
     pub const GRADE_GREAT: ThemeToken = ThemeToken::new_static("claudralingo.grade.great");
     pub const GRADE_LEGENDARY: ThemeToken = ThemeToken::new_static("claudralingo.grade.legendary");
@@ -281,6 +282,7 @@ fn terminal_theme(t: &Terminal) -> ThemeProps {
     set(&mut props, &tokens::PROGRESS_TRACK, item);
     set(&mut props, &tokens::PROGRESS_BAR, accent);
     set(&mut props, &tokens::HEADING, accent);
+    set(&mut props, &tokens::GRADE_STARTED, hex("#7cc4f5"));
     set(&mut props, &tokens::GRADE_GOOD, green);
     set(&mut props, &tokens::GRADE_GREAT, hex(t.purple));
     set(&mut props, &tokens::GRADE_LEGENDARY, yellow);
@@ -314,6 +316,7 @@ pub fn dark_theme() -> ThemeProps {
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#1b2542"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#00e5ff"));
     set(&mut props, &tokens::HEADING, hex("#4fd8ff"));
+    set(&mut props, &tokens::GRADE_STARTED, hex("#7cc4f5"));
     set(&mut props, &tokens::GRADE_GOOD, hex("#22ff88"));
     set(&mut props, &tokens::GRADE_GREAT, hex("#c77dff"));
     set(&mut props, &tokens::GRADE_LEGENDARY, hex("#ffd34d"));
@@ -400,6 +403,7 @@ pub fn light_theme() -> ThemeProps {
     set(&mut props, &tokens::PROGRESS_TRACK, hex("#d5d9e3"));
     set(&mut props, &tokens::PROGRESS_BAR, hex("#0088b8"));
     set(&mut props, &tokens::HEADING, hex("#005e86"));
+    set(&mut props, &tokens::GRADE_STARTED, hex("#4f9fd8"));
     set(&mut props, &tokens::GRADE_GOOD, hex("#138a4b"));
     set(&mut props, &tokens::GRADE_GREAT, hex("#8a2fc9"));
     set(&mut props, &tokens::GRADE_LEGENDARY, hex("#b8860b"));

@@ -7,3 +7,6 @@ mobile/target/
 *.jks
 *.jks.b64
 *.keystore
+
+# Python caches: they hold the local paths of the machine that ran the scripts.
+__pycache__/

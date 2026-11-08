@@ -7,8 +7,8 @@ use bevy::input::keyboard::{Key, KeyboardFocusLost, KeyboardInput};
 use bevy::prelude::*;
 
 use crate::klavaro::tutor::{Outcome, Query, Tutor};
-use crate::klavaro::{self, BACKSPACE, HYPER_BACKSPACE, KbdGrid, N_BASIC_LESSONS, UPSYM};
-use crate::layout::{Chord, KeyName, Layout, Mods, Special, Target, finger_name};
+use crate::klavaro::{self, BACKSPACE, KbdGrid, N_BASIC_LESSONS, UPSYM};
+use crate::layout::{Chord, KeyName, Layout, Mods, Special, Target};
 use crate::progress::{ExerciseMode, Progress, Session, now_unix_seconds};
 
 /// The legends are hidden after this many correct touches in a row.
@@ -24,6 +24,25 @@ const SUGGEST_MISSES: u32 = 3;
 const AUTOSAVE_SECONDS: f64 = 5.0;
 /// A finger below this accuracy suggests its drill.
 const SUGGEST_ACCURACY: f64 = 92.0;
+/// Without a key for this long the exercise pauses: the clock stops, the screen frosts over and
+/// Enter goes on.
+pub const PAUSE_AFTER: f64 = 10.0;
+
+/// Why a finger drill is suggested at the end of an exercise.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Reason {
+    /// The most missed key of the exercise and its misses.
+    Missed { key: char, times: u32 },
+    /// The weakest finger over all the touches, its accuracy.
+    Weakest { accuracy: f64 },
+}
+
+/// The finger drill suggested at the end of an exercise.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Suggestion {
+    pub finger: u8,
+    pub reason: Reason,
+}
 
 /// The keyboard grid of the basic lessons.
 #[derive(Resource)]
@@ -48,7 +67,12 @@ pub struct Exercise {
     /// "New record!", faster than the best time of the lesson.
     pub record: Option<String>,
     /// The finger drill suggested at the end, with the reason.
-    pub suggestion: Option<(u8, String)>,
+    pub suggestion: Option<Suggestion>,
+    /// The real words of a basic lesson, after its drill was passed: typed for the practice, they
+    /// do not hold the course back, see [`Progress::words_of`].
+    pub words: bool,
+    /// No key for [`PAUSE_AFTER`]: the clock waits for Enter.
+    pub paused: bool,
     /// The most missed characters of a failed exercise, red on the keyboard until the next one.
     pub review: Vec<char>,
     /// The words per minute, the accuracy and the fluidness against the last time of the same
@@ -64,7 +88,7 @@ pub fn goal(mode: ExerciseMode) -> f64 {
         ExerciseMode::Adaptability => 98.0,
         ExerciseMode::Velocity => 95.0,
         ExerciseMode::Fluidness => 97.0,
-        ExerciseMode::Custom => 95.0,
+        ExerciseMode::Quotes | ExerciseMode::Affirmations | ExerciseMode::Custom => 95.0,
         ExerciseMode::Fingers | ExerciseMode::BounceLeft | ExerciseMode::BounceRight => crate::drills::GOAL_ACCURACY,
         ExerciseMode::Shortcuts => 100.0,
         // The strokes right on the first try, a glimpse counts as two misses.
@@ -88,7 +112,10 @@ pub struct Coach {
     pub layer_trainer: bool,
     /// The plan of every target is shown, for the shortcuts.
     pub always_show: bool,
-    last_touch: f64,
+    /// The most the legends show in this lesson, lower as its grade rises: 1 before it is
+    /// passed, 0 once it is Legendary, the keys typed still light up. See [`legend_cap`].
+    pub legend_cap: f32,
+    pub last_touch: f64,
     /// A word of advice above the keyboard, until the time given.
     pub flash: Option<(String, f64)>,
 }
@@ -196,6 +223,7 @@ impl Plugin for GamePlugin {
             fade_legends: progress.fade_legends,
             layer_trainer: progress.layer_trainer,
             always_show: false,
+            legend_cap: 1.0,
             flash: None,
             last_touch: 0.0,
         };
@@ -221,6 +249,7 @@ impl Plugin for GamePlugin {
                     handle_typing,
                     crate::shortcuts::handle_shortcuts,
                     new_exercise.run_if(on_message::<NewExercise>),
+                    pause_when_idle,
                     update_coach,
                 )
                     .chain()
@@ -238,20 +267,24 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
     let char_set = klavaro::basic::lesson_char_set(lesson, grid);
     let mut lesson = lesson;
     let mut char_set = char_set;
+    let mut words = false;
+    if mode != ExerciseMode::Basic {
+        progress.words_of = None;
+    }
     let text = match mode {
-        // The drill, then real words of the keys learned, each with a key new in the lesson (or
-        // of the lesson, for the reviews), when they make enough of them.
-        ExerciseMode::Basic => {
-            let mut text = klavaro::basic::draw_lesson(&char_set);
-            let learned = crate::course::learned_chars(grid, lesson);
-            let before = crate::course::learned_chars(grid, lesson - 1);
-            let new: Vec<char> = char_set.iter().copied().filter(|c| !before.contains(c)).collect();
-            let focus = if new.is_empty() { &char_set } else { &new };
-            if let Some(words) = crate::course::word_lines(&learned, focus, 2) {
-                text.push_str(&words);
+        // The drill; once it is passed, the real words of the lesson on their own.
+        ExerciseMode::Basic => match progress.words_of.and_then(|l| basic_words(grid, l).map(|w| (l, w))) {
+            Some((of, text)) => {
+                words = true;
+                lesson = of;
+                char_set = klavaro::basic::lesson_char_set(of, grid);
+                text
             }
-            text
-        }
+            None => {
+                progress.words_of = None;
+                klavaro::basic::draw_lesson(&char_set)
+            }
+        },
         ExerciseMode::Layers => {
             let lessons = crate::course::layer_lessons(layout);
             let current = progress.current();
@@ -273,6 +306,8 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         }
         ExerciseMode::Velocity => klavaro::velocity::draw_random_words(),
         ExerciseMode::Fluidness => klavaro::fluidness::draw_random_paragraphs(),
+        ExerciseMode::Quotes => crate::quotes::draw_quotes(),
+        ExerciseMode::Affirmations => crate::quotes::draw_affirmations(),
         ExerciseMode::Custom => {
             let lines = crate::pasted::lines(&progress.pasted_text, |c| layout.locate(c).is_some());
             if lines.is_empty() {
@@ -309,7 +344,46 @@ pub fn generate(grid: &KbdGrid, layout: &Layout, progress: &mut Progress) -> Exe
         suggestion: None,
         review: Vec::new(),
         trend: None,
+        words,
+        paused: false,
     }
+}
+
+/// The real words of a basic lesson: the keys learned up to it, each word with a key new in the
+/// lesson (or of the lesson, for the reviews), `None` when they make too few words.
+pub fn basic_words(grid: &KbdGrid, lesson: usize) -> Option<String> {
+    let char_set = klavaro::basic::lesson_char_set(lesson, grid);
+    let learned = crate::course::learned_chars(grid, lesson);
+    let before = crate::course::learned_chars(grid, lesson - 1);
+    let new: Vec<char> = char_set.iter().copied().filter(|c| !before.contains(c)).collect();
+    let focus = if new.is_empty() { &char_set } else { &new };
+    crate::course::word_lines(&learned, focus, 2)
+}
+
+/// The most the legends show in a lesson of a grade: they fade more as the grade rises and are
+/// gone once it is Legendary.
+pub fn legend_cap(grade: Option<crate::lessons::Grade>) -> f32 {
+    use crate::lessons::Grade;
+    match grade {
+        None => 1.0,
+        Some(Grade::Good) => 0.6,
+        Some(Grade::Great) => 0.3,
+        Some(Grade::Legendary) => 0.0,
+    }
+}
+
+/// The best grade of the lesson of an exercise, from the sessions; the exercises without
+/// lessons take their best session.
+fn lesson_grade(progress: &Progress, exercise: &Exercise) -> Option<crate::lessons::Grade> {
+    let key = match exercise.mode {
+        _ if exercise.words => return None,
+        ExerciseMode::Basic | ExerciseMode::Layers => Some(exercise.lesson),
+        ExerciseMode::Fingers => Some(exercise.finger as usize),
+        _ => None,
+    };
+    let sessions = progress.layouts.get(progress.layout.key())?.sessions.iter();
+    let best = sessions.filter(|s| s.mode == exercise.mode && s.lesson == key).map(|s| s.accuracy).reduce(f64::max)?;
+    crate::lessons::Grade::of(best, goal(exercise.mode))
 }
 
 /// The keys of a warm-up, at least three with enough touches.
@@ -348,6 +422,7 @@ fn new_exercise(
     *exercise = generate(&grid.0, &layout.0, &mut progress);
     *drill = crate::shortcuts::Drill::new(&layout.0);
     coach.reset(time.elapsed_secs_f64());
+    coach.legend_cap = legend_cap(lesson_grade(&progress, &exercise));
 }
 
 fn is_modifier(key: &Key) -> Option<Special> {
@@ -401,7 +476,8 @@ fn chord(event: &KeyboardInput, mods: Mods) -> Option<Chord> {
 /// The character Klavaro would receive for a key press, `None` for the keys to ignore.
 fn typed_char(event: &KeyboardInput, mods: Mods) -> Option<char> {
     match &event.logical_key {
-        Key::Backspace if mods.ctrl => Some(HYPER_BACKSPACE),
+        // Ctrl+Backspace erased all the errors at once, F5 starts over instead.
+        Key::Backspace if mods.ctrl => None,
         Key::Backspace => Some(BACKSPACE),
         _ if mods.ctrl || mods.alt || mods.super_key || event.repeat => None,
         Key::Enter => Some(UPSYM),
@@ -412,6 +488,19 @@ fn typed_char(event: &KeyboardInput, mods: Mods) -> Option<char> {
             .and_then(|text| text.chars().next())
             .filter(|c| !c.is_control()),
     }
+}
+
+/// The seconds after the last key before a key goes on from the end of an exercise: the keys
+/// typed past the end, in full flow, do not skip it.
+const CONTINUE_AFTER: f64 = 0.6;
+
+/// At the end of an exercise any key goes on, not the ones of a shortcut (Alt+Tab, Ctrl+=), nor
+/// the arrows that change the lesson. The keys without a chord, the function keys and a key held
+/// down, do not get here.
+pub fn continues(chord: Chord, last_touch: f64, now: f64) -> bool {
+    let shortcut = chord.mods.ctrl || chord.mods.alt || chord.mods.super_key;
+    let arrow = matches!(chord.key, KeyName::Special(Special::Left | Special::Right));
+    now - last_touch >= CONTINUE_AFTER && !shortcut && !arrow
 }
 
 /// Follows the modifiers through the key events, in their order, and sends the key presses.
@@ -507,18 +596,31 @@ fn handle_typing(
     }
     let now = time.elapsed_secs_f64();
     for key in keys.read() {
+        // Paused, Enter goes on and the other keys wait.
+        if exercise.paused {
+            if key.chord == Some(Chord::special(Special::Enter)) {
+                exercise.tutor.resume(now);
+                exercise.paused = false;
+                coach.last_touch = now;
+            }
+            continue;
+        }
         if exercise.tutor.query == Query::End {
-            // Klavaro: Enter starts the next exercise, Backspace goes back one basic lesson.
-            if key.typed == Some(UPSYM) {
-                new_exercise.write_default();
-            } else if key.typed == Some(BACKSPACE) && exercise.mode == ExerciseMode::Basic {
+            // Any key starts the next exercise, Backspace goes back one basic lesson as in
+            // Klavaro, Tab goes to the suggested drill.
+            let Some(chord) = key.chord.filter(|chord| continues(*chord, coach.last_touch, now)) else {
+                continue;
+            };
+            if key.typed == Some(BACKSPACE) && exercise.mode == ExerciseMode::Basic {
                 // As Klavaro, from the lesson already increased when the goal was reached.
                 let current = progress.current();
                 current.basic_lesson = current.basic_lesson.saturating_sub(1).max(1);
                 progress.save();
                 new_exercise.write_default();
-            } else if key.chord == Some(Chord::special(Special::Tab)) {
+            } else if chord == Chord::special(Special::Tab) && exercise.suggestion.is_some() {
                 go_to_suggestion(&exercise, &mut progress, &mut new_exercise);
+            } else {
+                new_exercise.write_default();
             }
             continue;
         }
@@ -588,9 +690,16 @@ fn handle_typing(
     }
 }
 
+/// The most missed characters of an exercise: they blink red on the keyboard, no need to name them.
+fn most_missed(exercise: &Exercise) -> Vec<char> {
+    let mut missed: Vec<(char, u32)> = exercise.misses.iter().map(|(c, n)| (*c, *n)).collect();
+    missed.sort_by_key(|m| std::cmp::Reverse(m.1));
+    missed.into_iter().take(N_REVIEW).map(|(c, _)| c).collect()
+}
+
 /// Tab at the end of an exercise starts the suggested finger drill.
 pub fn go_to_suggestion(exercise: &Exercise, progress: &mut Progress, new_exercise: &mut MessageWriter<NewExercise>) {
-    if let Some((finger, _)) = exercise.suggestion {
+    if let Some(Suggestion { finger, .. }) = exercise.suggestion {
         progress.current().finger = finger;
         progress.mode = ExerciseMode::Fingers;
         progress.save();
@@ -599,10 +708,15 @@ pub fn go_to_suggestion(exercise: &Exercise, progress: &mut Progress, new_exerci
 }
 
 /// The drill of the finger of the most missed key of the exercise, or of the weakest finger.
-fn suggest(exercise: &Exercise, progress: &mut Progress, layout: &Layout) -> Option<(u8, String)> {
+fn suggest(exercise: &Exercise, progress: &mut Progress, layout: &Layout) -> Option<Suggestion> {
     if !matches!(
         exercise.mode,
-        ExerciseMode::Basic | ExerciseMode::Adaptability | ExerciseMode::Velocity | ExerciseMode::Fluidness
+        ExerciseMode::Basic
+            | ExerciseMode::Adaptability
+            | ExerciseMode::Velocity
+            | ExerciseMode::Fluidness
+            | ExerciseMode::Quotes
+            | ExerciseMode::Affirmations
     ) {
         return None;
     }
@@ -611,13 +725,11 @@ fn suggest(exercise: &Exercise, progress: &mut Progress, layout: &Layout) -> Opt
         && *n >= SUGGEST_MISSES
         && let Some(finger) = layout.finger_of(*c).filter(|f| *f != 0)
     {
-        let shown = if *c == ' ' { "Space".to_string() } else { c.to_string() };
-        return Some((finger, format!("{shown} was missed {n} times, it is typed with the {}", finger_name(finger))));
+        return Some(Suggestion { finger, reason: Reason::Missed { key: *c, times: *n } });
     }
     let fingers = progress.current().finger_accuracy(|c| layout.finger_of(c));
     let (finger, accuracy) = fingers.into_iter().filter(|(f, _)| *f != 0).min_by(|a, b| a.1.total_cmp(&b.1))?;
-    (accuracy < SUGGEST_ACCURACY)
-        .then(|| (finger, format!("your weakest finger is the {} at {accuracy:.0}%", finger_name(finger))))
+    (accuracy < SUGGEST_ACCURACY).then_some(Suggestion { finger, reason: Reason::Weakest { accuracy } })
 }
 
 /// The end of an exercise: the notes, the lesson to go on with, the session logged. The
@@ -641,15 +753,27 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
         progress.pasted_part += 1;
     }
     exercise.suggestion = suggest(exercise, progress, layout);
-    if results.accuracy < goal(mode) {
-        let mut missed: Vec<(char, u32)> = exercise.misses.iter().map(|(c, n)| (*c, *n)).collect();
-        missed.sort_by_key(|m| std::cmp::Reverse(m.1));
-        exercise.review = missed.into_iter().take(N_REVIEW).map(|(c, _)| c).collect();
-        if !exercise.review.is_empty() {
-            let keys: Vec<String> =
-                exercise.review.iter().map(|c| if *c == ' ' { "Space".into() } else { c.to_string() }).collect();
-            exercise.message.push_str(&format!("\nFocus next time: {}, red on the keyboard", keys.join("  ")));
+    if exercise.words {
+        // Done with the words, passed or not: on with the lesson the drill opened. Not logged
+        // as the lesson, its grade is the one of the drill; the minutes still count.
+        progress.words_of = None;
+        if results.accuracy < goal(mode) {
+            exercise.review = most_missed(exercise);
         }
+        progress.current().sessions.push(Session {
+            mode,
+            lesson: None,
+            accuracy: results.accuracy,
+            velocity: results.velocity,
+            fluidness: results.fluidness,
+            finished_at: now_unix_seconds(),
+            elapsed: results.elapsed,
+            quality: None,
+        });
+        return;
+    }
+    if results.accuracy < goal(mode) {
+        exercise.review = most_missed(exercise);
     }
     let n_layer_lessons = crate::course::layer_lessons(layout).len().max(1);
     let lesson_key = match mode {
@@ -670,12 +794,16 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             && results.velocity > 0.0
         {
             exercise.record = Some(format!(
-                "New record! {:.1} WPM faster than your best of {:.1} WPM, on {}.",
+                "New record! {:.1} WPM faster than your best of {:.1} WPM, {}.",
                 results.velocity - best.velocity,
                 best.velocity,
-                crate::stats::short_date(best.finished_at),
+                crate::stats::relative_date(best.finished_at, now_unix_seconds()),
             ));
         }
+    }
+    if mode == ExerciseMode::Basic && results.accuracy >= klavaro::basic::GOAL_ACCURACY {
+        // The words of the lesson come next, when it has some.
+        progress.words_of = Some(exercise.lesson);
     }
     let current = progress.current();
     if mode == ExerciseMode::Basic && results.accuracy >= klavaro::basic::GOAL_ACCURACY {
@@ -705,6 +833,17 @@ fn finish(exercise: &mut Exercise, progress: &mut Progress, layout: &Layout) {
             elapsed: results.elapsed,
             quality: None,
         });
+    }
+}
+
+/// No key for [`PAUSE_AFTER`] in the middle of a typing exercise: it pauses from the last key,
+/// the wait counts neither in the time nor in the words per minute.
+fn pause_when_idle(mut exercise: ResMut<Exercise>, coach: Res<Coach>, progress: Res<Progress>, panel: Res<crate::ui::Panel>, time: Res<Time<Real>>) {
+    let typing = progress.mode.is_typing() && exercise.tutor.query == Query::ProcessTouches;
+    let idle = time.elapsed_secs_f64() - coach.last_touch;
+    if typing && !exercise.paused && (idle >= PAUSE_AFTER || *panel != crate::ui::Panel::None) {
+        exercise.tutor.pause(coach.last_touch);
+        exercise.paused = true;
     }
 }
 
@@ -825,6 +964,21 @@ mod tests {
     }
 
     #[test]
+    fn any_key_goes_on_from_the_end_but_not_too_soon_nor_a_shortcut() {
+        let (last, now) = (10.0, 11.0);
+        assert!(continues(Chord::char('a'), last, now));
+        assert!(continues(Chord::char('A'), last, now));
+        assert!(continues(Chord::special(Special::Enter), last, now));
+        assert!(continues(Chord::special(Special::Escape), last, now));
+        // A key typed past the end, in full flow.
+        assert!(!continues(Chord::char('a'), last, last + 0.2));
+        let alt = Mods { alt: true, ..Mods::NONE };
+        assert!(!continues(Chord::new(alt, KeyName::Special(Special::Tab)), last, now));
+        assert!(!continues(Chord::special(Special::Left), last, now));
+        assert!(!continues(Chord::special(Special::Right), last, now));
+    }
+
+    #[test]
     fn a_passed_lesson_goes_on_to_the_next_one_a_failed_one_repeats() {
         let mut progress = Progress { mode: ExerciseMode::Basic, ..Progress::default() };
         let layout = progress.layout.build();
@@ -849,6 +1003,49 @@ mod tests {
         assert_eq!(progress.current().basic_lesson, 4);
         assert_eq!(progress.current().basic_unlocked, 4);
         assert_eq!(generate(&grid, &layout, &mut progress).lesson, 4);
+    }
+
+    #[test]
+    fn the_words_follow_a_passed_drill_and_do_not_hold_the_course_back() {
+        let mut progress = Progress { mode: ExerciseMode::Basic, layout: crate::layout::LayoutId::QwertyUs, ..Progress::default() };
+        let layout = progress.layout.build();
+        let grid = layout.klavaro_grid();
+        // The first lesson whose keys make enough real words.
+        let lesson = (1..=N_BASIC_LESSONS).find(|l| basic_words(&grid, *l).is_some()).expect("a lesson with words");
+        progress.current().basic_lesson = lesson;
+        progress.current().basic_unlocked = lesson;
+        // The drill alone, no words in it.
+        let mut drill = generate(&grid, &layout, &mut progress);
+        assert!(!drill.words);
+        let words = basic_words(&grid, lesson).unwrap();
+        assert!(!drill.tutor.text.iter().collect::<String>().contains(words.trim()));
+        type_exercise(&mut drill, &mut progress, &grid, 0);
+        finish(&mut drill, &mut progress, &layout);
+        assert_eq!(progress.current().basic_lesson, lesson + 1);
+        // Then its words, of the same lesson.
+        let mut exercise = generate(&grid, &layout, &mut progress);
+        assert!(exercise.words);
+        assert_eq!(exercise.lesson, lesson);
+        // Failed, they are not typed again: the next drill.
+        let n = exercise.tutor.text.len();
+        type_exercise(&mut exercise, &mut progress, &grid, n / 4);
+        assert!(exercise.tutor.results.unwrap().accuracy < goal(ExerciseMode::Basic));
+        let sessions = progress.current().sessions.len();
+        finish(&mut exercise, &mut progress, &layout);
+        assert_eq!(progress.words_of, None);
+        assert_eq!(progress.current().basic_lesson, lesson + 1);
+        // Logged without a lesson: the grade of the lesson is the drill's.
+        assert_eq!(progress.current().sessions.len(), sessions + 1);
+        assert_eq!(progress.current().sessions.last().unwrap().lesson, None);
+        let next = generate(&grid, &layout, &mut progress);
+        assert!(!next.words);
+        assert_eq!(next.lesson, lesson + 1);
+        // A failed drill has no words after it.
+        let mut failed = generate(&grid, &layout, &mut progress);
+        let n = failed.tutor.text.len();
+        type_exercise(&mut failed, &mut progress, &grid, n / 4);
+        finish(&mut failed, &mut progress, &layout);
+        assert_eq!(progress.words_of, None);
     }
 
     #[test]

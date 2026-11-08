@@ -27,7 +27,7 @@ use bevy::text::FontSource;
 
 use crate::game::{ActiveLayout, Coach, Exercise, KeyPressed};
 use crate::klavaro::tutor::Query as TutorQuery;
-use crate::klavaro::{HYPER_BACKSPACE, UPSYM};
+use crate::klavaro::UPSYM;
 use crate::klavaro::BACKSPACE;
 use crate::layout::{Chord, KeyName, Layout, Mods, Output, Plan, Special, Target};
 use crate::theme::tokens;
@@ -389,7 +389,8 @@ pub fn hints(layout: &Layout, target: Option<Target>, shown_layer: Option<u8>) -
 fn press_special(special: Special, mods: Mods) -> KeyPressed {
     let plain = !(mods.ctrl || mods.alt || mods.super_key);
     let typed = match special {
-        Special::Backspace if mods.ctrl => Some(HYPER_BACKSPACE),
+        // Ctrl+Backspace erased all the errors at once, F5 starts over instead.
+        Special::Backspace if mods.ctrl => None,
         Special::Backspace => Some(BACKSPACE),
         Special::Enter if plain => Some(UPSYM),
         Special::Space if plain => Some(' '),
@@ -488,8 +489,10 @@ fn update_hints(
     let step = FADE_RATE * time.delta_secs();
     view.shown_fade += (coach.fade - view.shown_fade).clamp(-step, step);
     let shown_layer = view.shown_layer();
-    // The legends of a layer on the screen are all shown.
-    let fade = if shown_layer.is_some() { 1.0 } else { view.shown_fade };
+    // The legends of a layer on the screen are all shown. The higher the grade of the lesson,
+    // the less they show: none once it is Legendary, the keys typed still light up.
+    let cap = if coach.fade_legends { coach.legend_cap } else { 1.0 };
+    let fade = if shown_layer.is_some() { 1.0 } else { view.shown_fade * cap };
     let names = &layout.layer_names;
 
     // On a layer on the screen, a key of that layer when one types the target.

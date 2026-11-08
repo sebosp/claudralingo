@@ -52,6 +52,18 @@ pub struct TrainerHint;
 #[derive(Component, Default, Clone)]
 struct LessonLabel;
 
+/// The keys of the exercise beside its label, as on the keyboard, in the colors of their fingers.
+#[derive(Component, Default, Clone)]
+struct LessonKeys;
+
+/// The grade at the end of an exercise: the stars and its name.
+#[derive(Component, Default, Clone)]
+struct GradeRow;
+#[derive(Component, Default, Clone)]
+struct GradeStar(usize);
+#[derive(Component, Default, Clone)]
+struct GradeName;
+
 #[derive(Component, Default, Clone)]
 struct LiveStats;
 
@@ -64,17 +76,30 @@ pub struct MessageText;
 #[derive(Component, Default, Clone)]
 pub struct RankingText;
 
-/// The summary at the end of an exercise: the pane, its title, the accuracy (green when the
-/// goal is reached, red otherwise), where Enter goes (green on, amber again), the record and
-/// the tip.
+/// The time of the exercise, at the right of the window.
 #[derive(Component, Default, Clone)]
-struct SummaryPane;
+struct Timer;
+#[derive(Component, Default, Clone)]
+struct TimerText;
+
+/// The accuracy at the end of a typing exercise, a line under the progress bar with the mark of
+/// the goal: the line, its fill and the mark.
+#[derive(Component, Default, Clone)]
+struct AccuracyLine;
+#[derive(Component, Default, Clone)]
+struct AccuracyFill;
+#[derive(Component, Default, Clone)]
+struct AccuracyMark;
+
+/// The summary at the end of an exercise: the pane, its header with the title (none for an
+/// exercise failed, the rest of the screen tells), the stars and the grade, the record and the
+/// tip. Any key goes on, see [`crate::game::continues`].
+#[derive(Component, Default, Clone)]
+pub struct SummaryPane;
+#[derive(Component, Default, Clone)]
+struct SummaryHeader;
 #[derive(Component, Default, Clone)]
 struct SummaryTitle;
-#[derive(Component, Default, Clone)]
-struct AccuracyText;
-#[derive(Component, Default, Clone)]
-pub struct VerdictText;
 #[derive(Component, Default, Clone)]
 struct RecordText;
 
@@ -133,15 +158,42 @@ fn fill_steps_bars(bars: Query<(&Steps, &Children), Changed<Steps>>, mut fills: 
     }
 }
 
-/// The first menu: touch typing or hanzi.
+/// The word under a button when the pointer rests on it, see [`show_tooltips`].
 #[derive(Component, Default, Clone)]
-struct SubjectSelect;
+pub struct Tooltip(pub &'static str);
+#[derive(Component, Default, Clone)]
+struct TooltipBox;
+#[derive(Component, Default, Clone)]
+struct TooltipText;
 
-/// The second menu: the exercises of the touch typing, or the HSK levels and the weak words.
+/// The pointer rests this long on a button before its tooltip shows.
+const TOOLTIP_DELAY: f64 = 0.4;
+
+/// The arrow beside the real words of a basic lesson: they are not needed to go on.
 #[derive(Component, Default, Clone)]
-struct TypingSelect;
+struct SkipWordsButton;
+
+/// The frosted glass over a paused exercise, Enter goes on.
 #[derive(Component, Default, Clone)]
-struct HanziSelect;
+struct PauseOverlay;
+
+/// The line of the suggested drill: the key, its misses and the button of the drill.
+#[derive(Component, Default, Clone)]
+struct SuggestRow;
+#[derive(Component, Default, Clone)]
+struct SuggestKey;
+#[derive(Component, Default, Clone)]
+struct SuggestText;
+#[derive(Component, Default, Clone)]
+struct SuggestCount;
+#[derive(Component, Default, Clone)]
+struct SuggestTail;
+#[derive(Component, Default, Clone)]
+struct SuggestFinger;
+
+/// The switch of the key clicks, in the settings.
+#[derive(Component, Default, Clone)]
+struct SwitchSelect;
 
 /// The toolbar at the top, it hides with the setting and in the full screen.
 #[derive(Component, Default, Clone)]
@@ -167,6 +219,8 @@ pub enum Setting {
     FadeLegends,
     LayerTrainer,
     ShowHands,
+    ShowKeyboard,
+    KeyClicks,
     ReduceMotion,
     LargeText,
     FitWindow,
@@ -178,6 +232,7 @@ pub enum Setting {
     Compact,
     FixWithBackspace,
     AutoHideToolbar,
+    DiscreteGpu,
 }
 
 #[derive(Component, Default, Clone)]
@@ -197,8 +252,14 @@ struct WritesLabel;
 const WRITES_STEPS: [u32; 11] = [0, 2, 4, 6, 8, 10, 15, 20, 30, 50, 100];
 
 /// Under the live statistics at the end: the trends against the last time of the lesson.
+/// The results at the end of a typing exercise, a column each for the words per minute, the
+/// accuracy and the fluidness: its value and, under it, the change since the last time.
 #[derive(Component, Default, Clone)]
-struct TrendRow;
+struct EndStats;
+#[derive(Component, Default, Clone)]
+struct EndColumn(usize);
+#[derive(Component, Default, Clone)]
+struct EndValue(usize);
 #[derive(Component, Default, Clone)]
 struct TrendText(usize);
 
@@ -257,6 +318,8 @@ struct LessonsGrid;
 pub enum Panel {
     #[default]
     None,
+    /// The main menu, the three subjects, see [`crate::home`].
+    Home,
     Help,
     Settings,
     Lessons,
@@ -320,33 +383,9 @@ impl Panel {
 }
 
 /// The sections of the help, their headings in the color and the weight of [`tokens::HEADING`].
-const HELP: [(&str, &str); 9] = [
-    (
-        "Menus",
-        "\
-The first menu is what you learn: Touch typing, Hanzi or Penmanship. The second one is its exercise or level,
-‹ › go through its lessons; they are grayed out at the ends and before a locked lesson.
-Lessons and Stats show those of the menu picked: the touch typing, the hanzi and the penmanship apart.",
-    ),
-    (
-        "Touch typing",
-        "\
-Basic course, Adaptability, Velocity, Fluidness: the exercises of Klavaro, real words at the end
-Layer course: the keys of Lower and Raise row by row    Warm-up: your weak keys, after a pause
-Finger drill, Left and Right hand finger bounce: one finger, or middle and index in turns
-Shortcuts & keys: Esc, arrows, Ctrl and Alt shortcuts, Alt+Tab",
-    ),
-    (
-        "Hanzi (HSK 1-4)",
-        "\
-Write each word with a pen, a finger or the mouse, then type its pinyin; each stroke gets its accuracy
-A new word is written before your eyes first, then ten times over fainter outlines, fewer as it is learned
-(or the count of the settings). The speaker says the word (Space too), Sound in the settings turns it off
-After three misses on a stroke it is written again: the word goes to the weak words, review them in the
-second menu. Hint shows the stroke too    Stroke breakdown: the word stroke by stroke, how the brush writes each
-The printer: the word in practice grids on an A4 page, as many times as you like, saved as a PDF
-Brush (settings): rings where the brush presses, thin ends lift; slow is thick without pressure",
-    ),
+/// A body whose lines start with `- ` is a bulleted list.
+const HELP: [(&str, &str); 4] = [
+    ("Hanzi", "HSK 1 through 4"),
     (
         "Penmanship",
         "\
@@ -358,33 +397,20 @@ Hint (or Space) shows the stroke again when you pause or miss, that write is not
 Settings, Penmanship: the Spencerian or the Copperplate sheet, the writes of a figure, the rows of the pad",
     ),
     (
-        "Toolbar",
-        "\
-The circling arrow (F5)  a new text, the word or the figure again    The notebook  your lessons and levels    The bars  calendar, progress, your keys or words
-The gear  the settings in tabs: general (keyboard, theme, zoom), touch typing, hanzi (sound, T9, writes), penmanship
-The toolbar hides in the full screen, it shows when the pointer goes to the top (or always, in the settings)",
-    ),
-    (
         "Shortcuts",
         "\
-F1 or ?  this help    F5  the exercise, the word or the figure again    F11  full screen    Esc  closes a panel
-Enter  the next exercise or level, once done    Backspace  the previous basic lesson, once done    Tab  the suggested drill
-← →  the lesson, the hanzi level or the penmanship lesson: before the first key and at the end, the ‹ › buttons at any time
-Ctrl+Backspace  all the errors    Space  hanzi: the word said; penmanship: the stroke shown, when Hint is there
-Ctrl and the wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0  zoom",
-    ),
-    (
-        "Typing",
-        "\
-Backspace erases the errors, Ctrl+Backspace all of them
-A line without errors clears in green, with one slip in orange
-At the end the summary says whether Enter goes on to the next lesson (green) or repeats it (amber)",
-    ),
-    (
-        "Colors",
-        "\
-green the next key, purple shift or hold the key longer (auto shift), amber hold, red backspace
-The stripes of the keys and the hands show the finger of every key, a miss streams out of it",
+- F1 or ?  this help
+- F5  the exercise, the word or the figure again
+- F11  full screen
+- Esc  closes a panel
+- Any key  the next exercise, once done
+- Enter  the next hanzi level or penmanship lesson, once done
+- Backspace  the previous basic lesson, once done
+- Tab  the suggested drill
+- ← →  the lesson, the hanzi level or the penmanship lesson: before the first key and at the end, the ‹ › buttons at any time
+- Space  hanzi: the word said; penmanship: the stroke shown, when Hint is there
+- Enter  goes on after a pause
+- Ctrl and the wheel, a pinch, Ctrl+= Ctrl+- Ctrl+0  zoom",
     ),
     (
         "On-screen keyboard",
@@ -395,7 +421,9 @@ Ctrl, Alt, Win: click them, then the key: they are never sent to your system",
     ),
 ];
 
-const HELP_FOOTER: &str = "Esc or a click closes this help. The progress is saved in ~/.config/claudralingo";
+const HELP_TITLE: &str = concat!("Help - Claudralingo ", env!("CARGO_PKG_VERSION"));
+
+const HELP_FOOTER: &str = "The progress is saved in ~/.config/claudralingo";
 
 /// A section of the help.
 #[derive(Component, Default, Clone)]
@@ -411,13 +439,13 @@ impl Plugin for UiPlugin {
         app.init_resource::<Panel>()
             .init_resource::<SettingsTab>()
             .init_resource::<PendingKeymap>()
-            .init_resource::<PendingText>().add_systems(Startup, (spawn_ui, first_help)).add_systems(
+            .init_resource::<PendingText>().add_systems(Startup, spawn_ui).add_systems(
             Update,
             (
-                (sync_settings, sync_mode_select, remember_typing_mode, enable_arrows, show_toolbar, full_screen),
+                (sync_settings, sync_selects, remember_typing_mode, enable_arrows, show_toolbar, keep_keys_off_the_menus, full_screen, show_tooltips),
                 show_mode_views,
                 update_lesson_label,
-                update_live_stats,
+                (update_live_stats, show_pause, show_skip_words),
                 update_message,
                 update_suggestion,
                 show_panels.run_if(resource_changed::<Panel>),
@@ -426,7 +454,7 @@ impl Plugin for UiPlugin {
                 show_hanzi,
                 fill_help,
                 fill_steps_bars,
-                update_trends,
+                update_end_stats,
                 update_actions,
                 arrow_lessons.after(crate::game::GameSystems),
                 import_keymap,
@@ -436,6 +464,7 @@ impl Plugin for UiPlugin {
                     update_zoom_label.run_if(resource_changed::<UiScale>),
                     update_writes_label,
                     update_pen_labels,
+                    update_accuracy_line,
                     show_settings_tab.run_if(|tab: Res<SettingsTab>, panel: Res<Panel>| tab.is_changed() || panel.is_changed()),
                 ),
             )
@@ -444,26 +473,8 @@ impl Plugin for UiPlugin {
     }
 }
 
-/// The options of the hanzi menu: the HSK levels, then the weak words.
-const HANZI_OPTIONS: [&str; 5] = ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "Weak words"];
-
-/// The option of the hanzi menu of the progress.
-fn hanzi_option(progress: &Progress, data: &crate::hanzi::data::HanziData) -> usize {
-    if progress.hanzi.review {
-        return HANZI_OPTIONS.len() - 1;
-    }
-    data.levels.get(progress.hanzi.level).map_or(0, |l| l.hsk.saturating_sub(1) as usize)
-}
-
-fn spawn_ui(mut commands: Commands, progress: Res<Progress>, data: Res<crate::hanzi::data::HanziData>) {
+fn spawn_ui(mut commands: Commands, progress: Res<Progress>) {
     commands.spawn(Camera2d);
-    let subject = Subject::ALL.iter().position(|s| *s == progress.mode.subject());
-    let subjects = list_rows_from_strings(Subject::ALL.map(Subject::name), subject);
-    let typing = Subject::Typing.modes();
-    let typing_mode = if progress.mode.subject() == Subject::Typing { progress.mode } else { progress.typing_mode };
-    let exercise = typing.iter().position(|m| *m == typing_mode);
-    let exercises = list_rows_from_strings(typing.iter().map(|m| m.name()), exercise);
-    let books = list_rows_from_strings(HANZI_OPTIONS, Some(hanzi_option(&progress, &data)));
     let layout = LayoutId::ALL.iter().position(|l| *l == progress.layout);
     let layouts = list_rows_from_strings(LayoutId::ALL.map(LayoutId::name), layout);
     let background = BackgroundLevel::ALL.iter().position(|b| *b == progress.background);
@@ -473,27 +484,32 @@ fn spawn_ui(mut commands: Commands, progress: Res<Progress>, data: Res<crate::ha
     use crate::penmanship::letters::Style;
     let sheet = Style::ALL.iter().position(|s| *s == progress.penmanship.style);
     let sheets = list_rows_from_strings(Style::ALL.map(Style::name), sheet);
-    commands.spawn_scene(root([subjects, exercises, books], layouts, backgrounds, themes, sheets));
+    let switch = crate::sounds::Switch::ALL.iter().position(|s| *s == progress.switch);
+    let switches = list_rows_from_strings(crate::sounds::Switch::ALL.map(crate::sounds::Switch::name), switch);
+    commands.spawn_scene(root(layouts, backgrounds, themes, sheets, switches));
 }
 
 fn root(
-    menus: [Box<dyn SceneList>; 3],
     layouts: Box<dyn SceneList>,
     backgrounds: Box<dyn SceneList>,
     themes: Box<dyn SceneList>,
     sheets: Box<dyn SceneList>,
+    switches: Box<dyn SceneList>,
 ) -> impl Scene {
     bsn! {
         // The root is a flex item of the viewport: without a minimum height of 0 it grows with
         // its content, zoomed in the footer went out of the window.
+        // Nor of a minimum width of 0: zoomed in, the keyboard widened it past the window and the
+        // buttons at the right of the toolbar went out of it.
         Node {
             width: percent(100),
             height: percent(100),
             min_height: px(0),
+            min_width: px(0),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            row_gap: px(10),
+            row_gap: px(2),
         }
         TabGroup
         ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
@@ -507,7 +523,7 @@ fn root(
             }
             BackgroundRoot
             --
-            @toolbar(menus)
+            @toolbar()
             --
             // Everything but the toolbar and the overlays scrolls, zoomed in.
             Node {
@@ -517,7 +533,7 @@ fn root(
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                row_gap: px(10),
+                row_gap: px(4),
                 overflow: Overflow::scroll_y(),
             }
             ScrollPosition::default()
@@ -531,10 +547,11 @@ fn root(
                     display: Display::Flex,
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
+                    // The text right over the keyboard. The room of a fourth line is above it,
+                    // the line just typed takes it and the keyboard does not move.
+                    justify_content: JustifyContent::End,
                     row_gap: px(10),
                     min_height: px(4.0 * crate::prompt::LINE_HEIGHT),
-                    margin: UiRect::top(px(6)),
                 }
                 ExerciseArea
                 TypingOnly
@@ -546,6 +563,20 @@ fn root(
                     }
                     PromptRoot
                     --
+                    // At the right of the words, on to the next lesson without them.
+                    @FeathersButton {
+                        @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Forward) }
+                    }
+                    Node {
+                        display: Display::None,
+                        position_type: PositionType::Absolute,
+                        right: px(-56),
+                        bottom: px(crate::prompt::LINE_HEIGHT),
+                    }
+                    SkipWordsButton
+                    Tooltip({"Next exercise"})
+                    on(skip_words)
+                    --
                     Node {
                         display: Display::None,
                         flex_direction: FlexDirection::Column,
@@ -554,7 +585,9 @@ fn root(
                     }
                     ShortcutsRoot
                     --
-                    // The summary at the end: how it went, where Enter goes, the keys to focus on.
+                    @crate::history::view()
+                    --
+                    // The summary at the end: how it went, the tip.
                     @group()
                     Node {
                         display: Display::None,
@@ -563,7 +596,10 @@ fn root(
                     }
                     SummaryPane
                     Children [
-                        @group_header() Children [ @label("") SummaryTitle ]
+                        @group_header()
+                        Node { justify_content: JustifyContent::Center }
+                        SummaryHeader
+                        Children [ @label("") SummaryTitle ]
                         --
                         @group_body()
                         Node {
@@ -573,13 +609,21 @@ fn root(
                             padding: UiRect::axes(px(16), px(14)),
                         }
                         Children [
-                            @label("") AccuracyText
-                            TextFont { font_size: FontSize::Px(24.0) }
-                            Node { display: Display::None }
-                            --
-                            @label("") VerdictText
-                            TextFont { font_size: FontSize::Px(18.0) }
-                            Node { display: Display::None }
+                            Node {
+                                display: Display::None,
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: px(4),
+                            }
+                            GradeRow
+                            Children [
+                                @grade_star(0) --
+                                @grade_star(1) --
+                                @grade_star(2) --
+                                @label("") GradeName
+                                TextFont { font_size: FontSize::Px(24.0) }
+                                Node { margin: UiRect::left(px(10)) }
+                            ]
                             --
                             @label("") RecordText
                             TextFont { font_size: FontSize::Px(16.0) }
@@ -591,12 +635,49 @@ fn root(
                             TextLayout { justify: Justify::Center }
                             Node { display: Display::None }
                             --
-                            @FeathersButton {
-                                @caption: bsn! { @caption("") SuggestCaption }
+                            // "[S] was missed 6 times.  [Train left ring finger]"
+                            Node {
+                                display: Display::None,
+                                flex_direction: FlexDirection::Row,
+                                flex_wrap: FlexWrap::Wrap,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                column_gap: px(8),
+                                row_gap: px(6),
                             }
-                            SuggestButton
-                            Node { display: Display::None }
-                            on(train_suggested_finger)
+                            SuggestRow
+                            Children [
+                                Node { flex_direction: FlexDirection::Row } SuggestKey
+                                --
+                                @label("") SuggestText
+                                TextFont { font_size: FontSize::Px(16.0) }
+                                --
+                                // The finger underlined in its color, as the stripes of the keys. In
+                                // the primary color: a gray button on the gray pane did not look
+                                // like one.
+                                @FeathersButton {
+                                    @variant: ButtonVariant::Primary,
+                                    @caption: bsn! {
+                                        Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: px(5) }
+                                        Children [
+                                            @label("Train")
+                                            ThemeTextColor(feathers_tokens::BUTTON_PRIMARY_TEXT)
+                                            --
+                                            Node { flex_direction: FlexDirection::Column, row_gap: px(1) }
+                                            Children [
+                                                @label("") SuggestCaption
+                                                ThemeTextColor(feathers_tokens::BUTTON_PRIMARY_TEXT)
+                                                --
+                                                Node { height: px(2), border_radius: BorderRadius::all(px(1)) }
+                                                BackgroundColor(Color::NONE)
+                                                SuggestFinger
+                                            ]
+                                        ]
+                                    }
+                                }
+                                SuggestButton
+                                on(train_suggested_finger)
+                            ]
                         ]
                     ]
                 ]
@@ -608,7 +689,7 @@ fn root(
                 @label("") TrainerHint
                 TypingOnly
                 Node {
-                    min_height: px(20),
+                    min_height: px(18),
                 }
                 --
                 Node {
@@ -617,7 +698,7 @@ fn root(
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Start,
                     column_gap: px(48),
-                    padding: px(8),
+                    padding: UiRect { left: px(8), right: px(8), top: px(0), bottom: px(8) },
                 }
                 KeyboardRoot
                 TypingOnly
@@ -653,9 +734,34 @@ fn root(
                 TextLayout { justify: Justify::Center, linebreak: LineBreak::WordBoundary }
             ]
             --
+            // Over the text and the keyboard of a paused exercise, under the toolbar.
+            Node {
+                position_type: PositionType::Absolute,
+                display: Display::None,
+                left: px(0),
+                top: px(0),
+                width: percent(100),
+                height: percent(100),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: px(18),
+            }
+            BackgroundColor(Color::NONE)
+            GlobalZIndex(30)
+            PauseOverlay
+            Children [
+                @crate::icons::icon(crate::icons::Icon::Pause)
+                Node { width: px(56), height: px(56) }
+                --
+                Node { flex_direction: FlexDirection::Row } PauseKey
+            ]
+            --
+            @crate::home::overlay()
+            --
             @help_overlay()
             --
-            @settings_overlay(layouts, backgrounds, themes, sheets)
+            @settings_overlay(layouts, backgrounds, themes, sheets, switches)
             --
             @lessons_overlay()
             --
@@ -664,11 +770,25 @@ fn root(
             @crate::stats::overlay()
             --
             @crate::hanzi::breakdown::overlay()
+            --
+            Node {
+                position_type: PositionType::Absolute,
+                display: Display::None,
+                padding: UiRect::axes(px(8), px(4)),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(6)),
+            }
+            ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+            ThemeBorderColor(feathers_tokens::GROUP_BORDER)
+            GlobalZIndex(80)
+            Pickable::IGNORE
+            TooltipBox
+            Children [ @label("") TooltipText Pickable::IGNORE ]
         ]
     }
 }
 
-fn toolbar([subjects, exercises, books]: [Box<dyn SceneList>; 3]) -> impl Scene {
+fn toolbar() -> impl Scene {
     bsn! {
         Node {
             width: percent(100),
@@ -686,47 +806,48 @@ fn toolbar([subjects, exercises, books]: [Box<dyn SceneList>; 3]) -> impl Scene 
         GlobalZIndex(40)
         Toolbar
         Children [
-            @FeathersSelect {
-                @options: subjects,
-            }
-            SubjectSelect
-            Node {
-                min_width: px(130),
-            }
-            on(on_subject_change)
-            --
-            @FeathersSelect {
-                @options: exercises,
-            }
-            TypingSelect
-            Node {
-                min_width: px(200),
-            }
-            on(on_exercise_change)
-            --
-            @FeathersSelect {
-                @options: books,
-            }
-            HanziSelect
-            Node {
-                display: Display::None,
-                min_width: px(110),
-            }
-            on(on_hanzi_change)
-            --
             @FeathersButton {
-                @caption: bsn! { @caption("‹") }
+                @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Home) }
             }
-            PreviousButton
-            on(previous_lesson)
+            Tooltip({"Main menu"})
+            on(go_home)
             --
-            @label_dim("") LessonLabel
+            @flex_spacer()
             --
-            @FeathersButton {
-                @caption: bsn! { @caption("›") }
+            // The lesson in the middle, on one line: its name and its keys between ‹ and ›. A
+            // narrow window moves it to a row of its own rather than breaking it.
+            Node {
+                flex_direction: FlexDirection::Row,
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                column_gap: px(8),
             }
-            NextButton
-            on(next_lesson)
+            Children [
+                @FeathersButton {
+                    @caption: bsn! { @caption("‹") }
+                }
+                PreviousButton
+                Tooltip({"Previous"})
+                on(previous_lesson)
+                --
+                @label_dim("") LessonLabel
+                Node { flex_shrink: 0.0 }
+                --
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_shrink: 0.0,
+                    align_items: AlignItems::Center,
+                    column_gap: px(3),
+                }
+                LessonKeys
+                --
+                @FeathersButton {
+                    @caption: bsn! { @caption("›") }
+                }
+                NextButton
+                Tooltip({"Next"})
+                on(next_lesson)
+            ]
             --
             @FeathersButton {
                 @caption: bsn! { @caption("Paste text") }
@@ -740,6 +861,7 @@ fn toolbar([subjects, exercises, books]: [Box<dyn SceneList>; 3]) -> impl Scene 
             @FeathersButton {
                 @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Restart) }
             }
+            Tooltip({"Refresh"})
             on(restart)
             --
             @flex_spacer()
@@ -747,21 +869,25 @@ fn toolbar([subjects, exercises, books]: [Box<dyn SceneList>; 3]) -> impl Scene 
             @FeathersButton {
                 @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Lessons) }
             }
+            Tooltip({"Lessons"})
             on(toggle_lessons)
             --
             @FeathersButton {
                 @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Stats) }
             }
+            Tooltip({"Stats"})
             on(toggle_stats)
             --
             @FeathersButton {
                 @caption: bsn! { @crate::icons::icon(crate::icons::Icon::Settings) }
             }
+            Tooltip({"Settings"})
             on(toggle_settings)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("?") }
             }
+            Tooltip({"Help"})
             on(toggle_help)
         ]
     }
@@ -778,7 +904,13 @@ pub fn setting_checkbox(setting: Setting, text: &'static str) -> impl Scene {
     }
 }
 
-fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>, themes: Box<dyn SceneList>, sheets: Box<dyn SceneList>) -> impl Scene {
+fn settings_overlay(
+    layouts: Box<dyn SceneList>,
+    backgrounds: Box<dyn SceneList>,
+    themes: Box<dyn SceneList>,
+    sheets: Box<dyn SceneList>,
+    switches: Box<dyn SceneList>,
+) -> impl Scene {
     bsn! {
         Node {
             position_type: PositionType::Absolute,
@@ -899,7 +1031,7 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                             on(on_background_change)
                         ]
                         --
-                        @setting_checkbox(Setting::LockLessons, "Lock lessons: pass a lesson (95%) to open the next one")
+                        @setting_checkbox(Setting::LockLessons, "Lock lessons: pass a lesson to open the next one")
                         --
                         @setting_checkbox(Setting::AutoHideToolbar, "Hide the toolbar: it shows when the pointer goes to the top (always in full screen, F11)")
                         --
@@ -934,6 +1066,33 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         @setting_checkbox(Setting::FitWindow, "Fit the window: a bigger window shows everything bigger")
                         --
                         @label_dim("Or Ctrl and the mouse wheel, a pinch of the trackpad, Ctrl+= Ctrl+- Ctrl+0, the wheel scrolls")
+                        --
+                        // Chosen in main.rs, the browsers and the phones pick their own.
+                        Node {
+                            display: {if cfg!(any(target_arch = "wasm32", target_os = "android", target_os = "ios")) { Display::None } else { Display::Flex }},
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: px(8),
+                        }
+                        Children [
+                            @setting_checkbox(Setting::DiscreteGpu, "Use the powerful graphics chip: the battery runs out sooner")
+                            --
+                            Node {
+                                width: px(20),
+                                height: px(20),
+                                flex_shrink: 0.0,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border_radius: BorderRadius::MAX,
+                            }
+                            ThemeBackgroundColor(feathers_tokens::BUTTON_BG)
+                            GpuHelpButton
+                            on(show_gpu_help)
+                            on(hide_gpu_help)
+                            Children [
+                                @label("?") Pickable::IGNORE
+                            ]
+                        ]
                     ]
                     --
                     Node {
@@ -949,13 +1108,33 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                         --
                         @setting_checkbox(Setting::LayerTrainer, "Layer trainer: show the layer and modifier keys to hold")
                         --
-                        @setting_checkbox(Setting::ShowHands, "Show the hands under the keyboard")
+                        @setting_checkbox(Setting::ShowKeyboard, "Show the keyboard")
+                        --
+                        @setting_checkbox(Setting::ShowHands, "Show the fingers under the keyboard")
                         --
                         @setting_checkbox(Setting::Compact, "Compact, for phones: no keyboard, the finger tips and the layer to hold")
                         --
                         @setting_checkbox(Setting::LargeText, "Large text to type")
                         --
                         @setting_checkbox(Setting::TypingSounds, "Typing sounds: a bell on a miss, a chime on a clean line, a falling tone for a key held too long")
+                        --
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: px(12),
+                        }
+                        Children [
+                            @setting_checkbox(Setting::KeyClicks, "Key clicks, in the sound of a switch")
+                            --
+                            @FeathersSelect {
+                                @options: switches,
+                            }
+                            Node {
+                                min_width: px(150),
+                            }
+                            SwitchSelect
+                            on(on_switch_change)
+                        ]
                     ]
                     --
                     Node {
@@ -1068,15 +1247,77 @@ fn settings_overlay(layouts: Box<dyn SceneList>, backgrounds: Box<dyn SceneList>
                             @label_dim("of the pad: the writes go down the rows, the sheet clears once they are full")
                         ]
                     ]
-                    --
-                    @FeathersButton {
-                        @caption: bsn! { @caption("Close") }
-                        @variant: ButtonVariant::Primary,
-                    }
-                    on(close_settings)
                 ]
             ]
+            --
+            // Over the question mark of the graphics chip, out of the panel that scrolls.
+            Node {
+                position_type: PositionType::Absolute,
+                display: Display::None,
+                width: px(GPU_HELP_WIDTH),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(6),
+                padding: UiRect::axes(px(10), px(8)),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(6)),
+            }
+            ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+            ThemeBorderColor(feathers_tokens::GROUP_BORDER)
+            GlobalZIndex(60)
+            Pickable::IGNORE
+            GpuHelp
+            Children [
+                @label("Only matters on computers with two graphics chips, such as many gaming laptops.") Pickable::IGNORE
+                --
+                @label("Off, the best for most people: uses less power and the battery lasts longer. Claudralingo does not need more.") Pickable::IGNORE
+                --
+                @label("On: uses more power and the battery runs out sooner. Try it only if the animations stutter.") Pickable::IGNORE
+                --
+                @label_dim("A change applies the next time you start Claudralingo.") Pickable::IGNORE
+            ]
         ]
+    }
+}
+
+/// The question mark beside the graphics chip setting, and the explanation it shows.
+#[derive(Component, Default, Clone)]
+struct GpuHelpButton;
+#[derive(Component, Default, Clone)]
+struct GpuHelp;
+
+const GPU_HELP_WIDTH: f32 = 420.0;
+
+/// Above the question mark, the setting is at the bottom of the panel, inside the window.
+fn show_gpu_help(
+    _: On<PointerOver>,
+    buttons: Query<(&ComputedNode, &UiGlobalTransform), With<GpuHelpButton>>,
+    overlays: Query<&ComputedNode, With<SettingsOverlay>>,
+    mut helps: Query<&mut Node, With<GpuHelp>>,
+) {
+    let (Ok((button, transform)), Ok(overlay)) = (buttons.single(), overlays.single()) else {
+        return;
+    };
+    let scale = button.inverse_scale_factor;
+    let (size, center, window) = (button.size() * scale, transform.translation * scale, overlay.size() * scale);
+    for mut help in &mut helps {
+        help.display = Display::Flex;
+        help.left = px((center.x - GPU_HELP_WIDTH / 2.0).min(window.x - GPU_HELP_WIDTH - 8.0).max(8.0));
+        help.bottom = px(window.y - center.y + size.y / 2.0 + 6.0);
+    }
+}
+
+fn hide_gpu_help(_: On<PointerOut>, mut helps: Query<&mut Node, With<GpuHelp>>) {
+    for mut help in &mut helps {
+        help.display = Display::None;
+    }
+}
+
+/// A star of the grade at the end of an exercise.
+fn grade_star(i: usize) -> impl Scene {
+    bsn! {
+        @crate::icons::icon(crate::icons::Icon::StarEmpty)
+        Node { width: px(32), height: px(32) }
+        GradeStar({i})
     }
 }
 
@@ -1340,9 +1581,19 @@ fn spawn_section(
         let go = lesson.go;
         let locked = matches!(lesson.status, Status::Ahead { locked: true, .. });
         commands.entity(tile).observe(
-            move |_: On<PointerClick>, mut progress: ResMut<Progress>, mut panel: ResMut<Panel>, mut new_exercise: MessageWriter<NewExercise>| {
+            move |_: On<PointerClick>,
+                  mut progress: ResMut<Progress>,
+                  mut panel: ResMut<Panel>,
+                  data: Res<crate::hanzi::data::HanziData>,
+                  mut practice: ResMut<crate::hanzi::Practice>,
+                  mut new_exercise: MessageWriter<NewExercise>| {
                 if locked {
                     return;
+                }
+                if go == crate::lessons::Go::HanziReview && !crate::hanzi::start_review(&mut progress, &data) {
+                    practice.message =
+                        "No weak words yet: a word becomes weak when one of its strokes is shown, after three misses or with Hint.".into();
+                    progress.mode = ExerciseMode::Hanzi;
                 }
                 crate::lessons::go(&mut progress, go);
                 progress.save();
@@ -1403,7 +1654,7 @@ fn help_overlay() -> impl Scene {
                 max_height: percent(94),
             }
             Children [
-                @group_header() Children [ @label("Help") ]
+                @group_header() Children [ @label(HELP_TITLE) ]
                 --
                 @group_body()
                 Node {
@@ -1448,13 +1699,33 @@ fn fill_help(sections: Query<Entity, Added<HelpSections>>, asset_server: Res<Ass
                 Node { margin: UiRect::top(px(if i == 0 { 0.0 } else { 10.0 })), ..default() },
                 ChildOf(root),
             ));
-            commands.spawn((
-                Text::new(*body),
-                font(false, 14.0),
-                ThemeTextColor(feathers_tokens::TEXT_MAIN),
-                Node { margin: UiRect::left(px(12)), ..default() },
-                ChildOf(root),
-            ));
+            if body.starts_with("- ") {
+                for item in body.lines().filter_map(|line| line.strip_prefix("- ")) {
+                    // The bullet in a column of its own: a long item wraps under its text.
+                    let row = commands
+                        .spawn((
+                            Node { margin: UiRect::left(px(12)), column_gap: px(8), ..default() },
+                            ChildOf(root),
+                        ))
+                        .id();
+                    for text in ["\u{2022}", item] {
+                        commands.spawn((
+                            Text::new(text),
+                            font(false, 14.0),
+                            ThemeTextColor(feathers_tokens::TEXT_MAIN),
+                            ChildOf(row),
+                        ));
+                    }
+                }
+            } else {
+                commands.spawn((
+                    Text::new(*body),
+                    font(false, 14.0),
+                    ThemeTextColor(feathers_tokens::TEXT_MAIN),
+                    Node { margin: UiRect::left(px(12)), ..default() },
+                    ChildOf(root),
+                ));
+            }
         }
     }
 }
@@ -1463,49 +1734,183 @@ fn fill_help(sections: Query<Entity, Added<HelpSections>>, asset_server: Res<Ass
 /// background does not run under them.
 fn stats_bar() -> impl Scene {
     bsn! {
+        // The whole width of the window, for the time at its right.
         Node {
             display: Display::Flex,
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: px(6),
-            width: px(640),
-            padding: UiRect::axes(px(16), px(8)),
-            border_radius: BorderRadius::all(px(10)),
-            margin: UiRect::top(px(6)),
+            width: percent(100),
+            justify_content: JustifyContent::Center,
         }
-        ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
         TypingOnly
         Children [
-            @label("") LiveStats
-            --
             Node {
-                display: Display::None,
-                flex_direction: FlexDirection::Row,
-                column_gap: px(18),
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(6),
+                width: px(640),
+                max_width: percent(100),
+                padding: UiRect::axes(px(16), px(4)),
+                border_radius: BorderRadius::all(px(10)),
             }
-            TrendRow
+            ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
             Children [
-                Text("") TrendText(0) --
-                Text("") TrendText(1) --
-                Text("") TrendText(2)
-            ]
-            --
-            Node {
-                width: percent(100),
-                height: px(6),
-                border_radius: BorderRadius::all(px(3)),
-            }
-            ThemeBackgroundColor(tokens::PROGRESS_TRACK)
-            Children [
+                @label("") LiveStats
+                --
                 Node {
-                    width: percent(0),
-                    height: percent(100),
+                    display: Display::None,
+                    width: percent(100),
+                    flex_direction: FlexDirection::Row,
+                }
+                EndStats
+                Children [
+                    @end_column(0) --
+                    @end_column(1) --
+                    @end_column(2)
+                ]
+                --
+                Node {
+                    width: percent(100),
+                    height: px(6),
                     border_radius: BorderRadius::all(px(3)),
                 }
-                ThemeBackgroundColor(tokens::PROGRESS_BAR)
-                ProgressBar
+                ThemeBackgroundColor(tokens::PROGRESS_TRACK)
+                Children [
+                    Node {
+                        width: percent(0),
+                        height: percent(100),
+                        border_radius: BorderRadius::all(px(3)),
+                    }
+                    ThemeBackgroundColor(tokens::PROGRESS_BAR)
+                    ProgressBar
+                ]
+                --
+                // The accuracy once it is over, the mark taller than the line.
+                Node {
+                    display: Display::None,
+                    width: percent(100),
+                    height: px(14),
+                    align_items: AlignItems::Center,
+                }
+                AccuracyLine
+                Children [
+                    Node {
+                        width: percent(100),
+                        height: px(6),
+                        border_radius: BorderRadius::all(px(3)),
+                    }
+                    ThemeBackgroundColor(tokens::PROGRESS_TRACK)
+                    Children [
+                        Node {
+                            width: percent(0),
+                            height: percent(100),
+                            border_radius: BorderRadius::all(px(3)),
+                        }
+                        ThemeBackgroundColor(tokens::CHAR_CORRECT)
+                        AccuracyFill
+                    ]
+                    --
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: px(2),
+                        height: percent(100),
+                        margin: UiRect::left(px(-1)),
+                    }
+                    ThemeBackgroundColor(feathers_tokens::TEXT_MAIN)
+                    AccuracyMark
+                ]
+            ]
+            --
+            Node {
+                position_type: PositionType::Absolute,
+                display: Display::None,
+                right: px(12),
+                top: px(0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                padding: UiRect::axes(px(10), px(4)),
+                border_radius: BorderRadius::all(px(8)),
+            }
+            ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
+            Timer
+            Children [
+                @crate::icons::icon(crate::icons::Icon::Stopwatch)
+                --
+                @label("") TimerText
             ]
         ]
+    }
+}
+
+/// A column of the results, the same width as the others.
+fn end_column(i: usize) -> impl Scene {
+    bsn! {
+        Node {
+            flex_basis: px(0),
+            flex_grow: 1.0,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(2),
+        }
+        EndColumn({i})
+        Children [
+            @label("") EndValue({i})
+            --
+            Text("") TrendText({i})
+            Node { display: Display::None }
+        ]
+    }
+}
+
+/// The accuracy in whole percents, rounded down: 94.8% shows 94%, never the 95% of a pass it
+/// is not, nor 100% for a single error.
+fn accuracy_shown(accuracy: f64) -> u32 {
+    accuracy.max(0.0).floor() as u32
+}
+
+/// The time on the stopwatch, minutes and seconds.
+fn clock(seconds: f64) -> String {
+    let seconds = seconds.max(0.0) as u64;
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// How far the fill and the mark of the goal go on the accuracy line, in percents: it starts 20
+/// points under the goal, on a line from 0 a miss by little would not show.
+fn accuracy_line(accuracy: f64, goal: f64) -> (f32, f32) {
+    let start = (goal - 20.0).max(0.0);
+    let at = |value: f64| (100.0 * (value - start) / (100.0 - start)).clamp(0.0, 100.0) as f32;
+    (at(accuracy), at(goal))
+}
+
+/// The accuracy line of a typing exercise that is over, green from the goal on, red under it.
+#[allow(clippy::type_complexity)]
+fn update_accuracy_line(
+    exercise: Res<Exercise>,
+    progress: Res<Progress>,
+    mut lines: Query<&mut Node, (With<AccuracyLine>, Without<AccuracyFill>, Without<AccuracyMark>)>,
+    mut fills: Query<(Entity, &mut Node), (With<AccuracyFill>, Without<AccuracyMark>)>,
+    mut marks: Query<&mut Node, With<AccuracyMark>>,
+    mut commands: Commands,
+) {
+    if !exercise.is_changed() && !progress.is_changed() {
+        return;
+    }
+    let results = exercise.tutor.results.filter(|_| exercise.tutor.query == TutorQuery::End && progress.mode.is_typing());
+    for mut node in &mut lines {
+        node.display = if results.is_some() { Display::Flex } else { Display::None };
+    }
+    let Some(results) = results else {
+        return;
+    };
+    let goal = crate::game::goal(exercise.mode);
+    let (fill, mark) = accuracy_line(results.accuracy, goal);
+    for (entity, mut node) in &mut fills {
+        node.width = percent(fill);
+        let token = if results.accuracy >= goal { tokens::CHAR_CORRECT } else { tokens::CHAR_WRONG };
+        commands.entity(entity).insert(ThemeBackgroundColor(token));
+    }
+    for mut node in &mut marks {
+        node.left = percent(mark);
     }
 }
 
@@ -1516,6 +1921,8 @@ impl Setting {
             Setting::FadeLegends => progress.fade_legends,
             Setting::LayerTrainer => progress.layer_trainer,
             Setting::ShowHands => progress.show_hands,
+            Setting::ShowKeyboard => progress.show_keyboard,
+            Setting::KeyClicks => progress.key_clicks,
             Setting::ReduceMotion => progress.reduce_motion,
             Setting::LargeText => progress.large_text,
             Setting::FitWindow => progress.fit_window,
@@ -1527,6 +1934,7 @@ impl Setting {
             Setting::Compact => progress.compact,
             Setting::FixWithBackspace => progress.fix_with_backspace,
             Setting::AutoHideToolbar => progress.auto_hide_toolbar,
+            Setting::DiscreteGpu => progress.discrete_gpu,
         }
     }
 }
@@ -1580,6 +1988,8 @@ fn on_setting_change(
         Setting::FadeLegends => progress.fade_legends = change.value,
         Setting::LayerTrainer => progress.layer_trainer = change.value,
         Setting::ShowHands => progress.show_hands = change.value,
+        Setting::ShowKeyboard => progress.show_keyboard = change.value,
+        Setting::KeyClicks => progress.key_clicks = change.value,
         Setting::ReduceMotion => progress.reduce_motion = change.value,
         Setting::LargeText => progress.large_text = change.value,
         Setting::FitWindow => progress.fit_window = change.value,
@@ -1591,98 +2001,18 @@ fn on_setting_change(
         Setting::Compact => progress.compact = change.value,
         Setting::FixWithBackspace => progress.fix_with_backspace = change.value,
         Setting::AutoHideToolbar => progress.auto_hide_toolbar = change.value,
+        Setting::DiscreteGpu => progress.discrete_gpu = change.value,
     }
     progress.save();
     release_focus(&mut focus);
 }
 
-fn on_subject_change(
-    change: On<ValueChange<Entity>>,
-    options: Query<&OptionIndex>,
-    mut progress: ResMut<Progress>,
-    mut new_exercise: MessageWriter<NewExercise>,
-    mut focus: ResMut<InputFocus>,
-) {
-    if let Ok(option) = options.get(change.value)
-        && let Some(subject) = Subject::ALL.get(option.0)
-        && *subject != progress.mode.subject()
-    {
-        progress.mode = match subject {
-            Subject::Typing => progress.typing_mode,
-            Subject::Hanzi => ExerciseMode::Hanzi,
-            Subject::Penmanship => ExerciseMode::Penmanship,
-        };
-        progress.save();
-        new_exercise.write_default();
-    }
-    release_focus(&mut focus);
-}
-
-fn on_exercise_change(
-    change: On<ValueChange<Entity>>,
-    options: Query<&OptionIndex>,
-    mut progress: ResMut<Progress>,
-    mut new_exercise: MessageWriter<NewExercise>,
-    mut focus: ResMut<InputFocus>,
-) {
-    if let Ok(option) = options.get(change.value)
-        && let Some(mode) = Subject::Typing.modes().get(option.0)
-    {
-        progress.mode = *mode;
-        progress.save();
-        new_exercise.write_default();
-    }
-    release_focus(&mut focus);
-}
-
-/// An HSK level: its first level not done yet, not past the locked ones; or the weak words.
-#[allow(clippy::too_many_arguments)]
-fn on_hanzi_change(
-    change: On<ValueChange<Entity>>,
-    options: Query<&OptionIndex>,
-    mut progress: ResMut<Progress>,
-    data: Res<crate::hanzi::data::HanziData>,
-    mut practice: ResMut<crate::hanzi::Practice>,
-    mut new_exercise: MessageWriter<NewExercise>,
-    mut focus: ResMut<InputFocus>,
-) {
-    release_focus(&mut focus);
-    let Ok(OptionIndex(option)) = options.get(change.value).copied() else {
-        return;
-    };
-    if option == HANZI_OPTIONS.len() - 1 {
-        if crate::hanzi::start_review(&mut progress, &data) {
-            new_exercise.write_default();
-        } else {
-            practice.message =
-                "No weak words yet: a word becomes weak when one of its strokes is shown, after three misses or with Hint.".into();
-            // The menu goes back to the level.
-            progress.set_changed();
-        }
-        return;
-    }
-    let levels = data.levels_of_hsk(option as u8 + 1);
-    let open = if progress.lock_lessons { hanzi_unlocked(&progress) } else { usize::MAX };
-    if levels.start > open {
-        practice.message = format!("HSK {} opens when HSK {} is done, or without the locked lessons (settings).", option + 1, option);
-        progress.set_changed();
-        return;
-    }
-    let level = levels.clone().find(|l| !progress.hanzi.levels_done.contains_key(l)).unwrap_or(levels.start).min(open);
-    crate::hanzi::go_to_level(&mut practice, &mut progress, &data, level);
-    new_exercise.write_default();
-}
-
-/// The menus follow the progress: the mode also changes from the keyboard and the buttons.
 #[allow(clippy::type_complexity)]
-fn sync_mode_select(
+/// The selects of the settings follow the progress: the keyboard also changes with an import,
+/// the switch with the settings of another window.
+fn sync_selects(
     progress: Res<Progress>,
-    data: Res<crate::hanzi::data::HanziData>,
-    selects: Query<
-        (Entity, Has<SubjectSelect>, Has<TypingSelect>, Has<HanziSelect>, Has<LayoutSelect>),
-        Or<(With<SubjectSelect>, With<TypingSelect>, With<HanziSelect>, With<LayoutSelect>)>,
-    >,
-    mut nodes: Query<&mut Node, Or<(With<TypingSelect>, With<HanziSelect>)>>,
+    selects: Query<(Entity, Has<LayoutSelect>), Or<(With<LayoutSelect>, With<SwitchSelect>)>>,
     children: Query<&Children>,
     rows: Query<(&OptionIndex, Has<Selected>)>,
     mut commands: Commands,
@@ -1690,30 +2020,12 @@ fn sync_mode_select(
     if !progress.is_changed() {
         return;
     }
-    let subject = progress.mode.subject();
-    let typing_mode = if subject == Subject::Typing { progress.mode } else { progress.typing_mode };
-    for (select, is_subject, is_typing, is_hanzi, is_layout) in &selects {
-        let index = if is_subject {
-            Subject::ALL.iter().position(|s| *s == subject)
-        } else if is_typing {
-            Subject::Typing.modes().iter().position(|m| *m == typing_mode)
-        } else if is_hanzi {
-            Some(hanzi_option(&progress, &data))
-        } else if is_layout {
+    for (select, is_layout) in &selects {
+        let index = if is_layout {
             LayoutId::ALL.iter().position(|l| *l == progress.layout)
         } else {
-            continue;
+            crate::sounds::Switch::ALL.iter().position(|s| *s == progress.switch)
         };
-        if let Ok(mut node) = nodes.get_mut(select) {
-            let shown = if (is_typing && subject == Subject::Typing) || (is_hanzi && subject == Subject::Hanzi) {
-                Display::Flex
-            } else {
-                Display::None
-            };
-            if node.display != shown {
-                node.display = shown;
-            }
-        }
         for row in children.iter_descendants(select) {
             if let Ok((option, selected)) = rows.get(row) {
                 let wanted = Some(option.0) == index;
@@ -1725,6 +2037,16 @@ fn sync_mode_select(
             }
         }
     }
+}
+
+fn on_switch_change(change: On<ValueChange<Entity>>, options: Query<&OptionIndex>, mut progress: ResMut<Progress>, mut focus: ResMut<InputFocus>) {
+    if let Ok(option) = options.get(change.value)
+        && let Some(switch) = crate::sounds::Switch::ALL.get(option.0)
+    {
+        progress.switch = *switch;
+        progress.save();
+    }
+    release_focus(&mut focus);
 }
 
 /// The exercise of the touch typing to go back to from the hanzi.
@@ -1917,6 +2239,7 @@ fn change_lesson(progress: &mut Progress, layout: &crate::layout::Layout, data: 
     let Some(step) = step(progress, layout, data, delta) else {
         return false;
     };
+    progress.words_of = None;
     match step {
         Step::Basic(lesson) => progress.current().basic_lesson = lesson,
         Step::Layer(lesson) => progress.current().layer_lesson = lesson,
@@ -2062,6 +2385,67 @@ fn restart(_: On<Activate>, mut new_exercise: MessageWriter<NewExercise>, mut fo
     release_focus(&mut focus);
 }
 
+fn go_home(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
+    panel.toggle(Panel::Home);
+    release_focus(&mut focus);
+}
+
+/// On to the next lesson without its words.
+fn skip_words(_: On<Activate>, mut progress: ResMut<Progress>, mut new_exercise: MessageWriter<NewExercise>, mut focus: ResMut<InputFocus>) {
+    progress.words_of = None;
+    new_exercise.write_default();
+    release_focus(&mut focus);
+}
+
+/// The arrow beside the words, while they are typed.
+fn show_skip_words(exercise: Res<Exercise>, progress: Res<Progress>, mut buttons: Query<&mut Node, With<SkipWordsButton>>) {
+    if !exercise.is_changed() && !progress.is_changed() {
+        return;
+    }
+    let shown = exercise.words && progress.mode == ExerciseMode::Basic && exercise.tutor.query != TutorQuery::End;
+    for mut node in &mut buttons {
+        let display = if shown { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+}
+
+/// The frosted glass over a paused exercise, and the Enter key on it.
+#[allow(clippy::too_many_arguments)]
+fn show_pause(
+    exercise: Res<Exercise>,
+    progress: Res<Progress>,
+    layout: Res<ActiveLayout>,
+    theme: Res<bevy::feathers::theme::UiTheme>,
+    asset_server: Res<AssetServer>,
+    mut overlays: Query<(&mut Node, &mut BackgroundColor), With<PauseOverlay>>,
+    keys: Query<(Entity, Option<&Children>), With<PauseKey>>,
+    mut commands: Commands,
+) {
+    if !exercise.is_changed() && !progress.is_changed() && !theme.is_changed() {
+        return;
+    }
+    let paused = exercise.paused && progress.mode.is_typing();
+    for (mut node, mut background) in &mut overlays {
+        let display = if paused { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        // Frosted: the window's own color, the text and the keys show through faintly.
+        let frost = theme.color(&feathers_tokens::WINDOW_BG).with_alpha(0.88);
+        if background.0 != frost {
+            background.0 = frost;
+        }
+    }
+    for (root, children) in &keys {
+        if children.is_none_or(|c| c.is_empty()) || theme.is_changed() {
+            commands.entity(root).despawn_children();
+            spawn_keycap(&mut commands, root, crate::klavaro::UPSYM, &layout.0, &theme, &asset_server, 1.6);
+        }
+    }
+}
+
 fn train_suggested_finger(
     _: On<Activate>,
     exercise: Res<Exercise>,
@@ -2071,15 +2455,6 @@ fn train_suggested_finger(
 ) {
     go_to_suggestion(&exercise, &mut progress, &mut new_exercise);
     release_focus(&mut focus);
-}
-
-/// The help on the first start; after it the app opens on the exercise of the last session.
-fn first_help(mut progress: ResMut<Progress>, mut panel: ResMut<Panel>) {
-    if !progress.help_seen {
-        *panel = Panel::Help;
-        progress.help_seen = true;
-        progress.save();
-    }
 }
 
 /// "Basic course, lesson 10": an exercise with its lesson, finger, level or part, as the
@@ -2241,11 +2616,6 @@ fn update_pen_labels(
     }
 }
 
-fn close_settings(_: On<Activate>, mut panel: ResMut<Panel>, mut focus: ResMut<InputFocus>) {
-    *panel = Panel::None;
-    release_focus(&mut focus);
-}
-
 fn close_help(_: On<PointerClick>, mut panel: ResMut<Panel>) {
     if *panel == Panel::Help {
         *panel = Panel::None;
@@ -2322,7 +2692,7 @@ fn show_hanzi(
     let show = |visible: bool| if visible { Display::Flex } else { Display::None };
     for (mut node, is_keyboard) in &mut typing {
         // The exercise area hides its own parts; the compact view has no keyboard.
-        let display = show(!drawing && !(is_keyboard && progress.compact));
+        let display = show(!drawing && !(is_keyboard && (progress.compact || !progress.show_keyboard)));
         if node.display != display {
             node.display = display;
         }
@@ -2337,17 +2707,20 @@ fn show_hanzi(
 
 fn show_hands(
     progress: Res<Progress>,
+    exercise: Res<Exercise>,
     mut hands: Query<&mut Node, (With<HandsRoot>, Without<CompactSpacer>)>,
     mut spacers: Query<&mut Node, With<CompactSpacer>>,
 ) {
-    if !progress.is_changed() {
+    if !progress.is_changed() && !exercise.is_changed() {
         return;
     }
+    // At the end of a typing exercise the history and the summary take their room.
+    let ended = progress.mode.is_typing() && exercise.tutor.query == TutorQuery::End;
     for mut node in &mut spacers {
         node.display = if progress.compact && progress.mode.subject() == Subject::Typing { Display::Flex } else { Display::None };
     }
     // No hands in the hanzi and penmanship modes, nor in the Matrix.
-    let display = if progress.show_hands && progress.mode.subject() == Subject::Typing && progress.theme != ThemeMode::Matrix {
+    let display = if progress.show_hands && !ended && progress.mode.subject() == Subject::Typing && progress.theme != ThemeMode::Matrix {
         Display::Flex
     } else {
         Display::None
@@ -2393,54 +2766,148 @@ fn show_mode_views(
     for mut node in &mut shortcuts {
         set(&mut node, !typing && !ended);
     }
+    let says_something = !typing || !ended || !summary(&exercise).is_empty();
     for mut node in &mut panes {
-        set(&mut node, ended);
+        set(&mut node, ended && says_something);
     }
 }
 
+/// The Enter key on the frosted glass of a pause.
+#[derive(Component, Default, Clone)]
+struct PauseKey;
+
+/// The keys an exercise is about.
+fn lesson_keys(mode: ExerciseMode, exercise: &Exercise, layout: &crate::layout::Layout) -> Vec<char> {
+    match mode {
+        ExerciseMode::Basic | ExerciseMode::Review => exercise.char_set.clone(),
+        ExerciseMode::Fingers if exercise.finger == 5 => vec![' ', crate::klavaro::UPSYM],
+        ExerciseMode::Fingers => layout.finger_chars(exercise.finger).iter().map(|(c, _)| *c).collect(),
+        ExerciseMode::BounceLeft | ExerciseMode::BounceRight => {
+            let (middle, columns) = crate::drills::bounce_keys(layout, mode == ExerciseMode::BounceLeft);
+            middle.into_iter().chain(columns.into_iter().flatten()).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The small keys beside the label: as on the keyboard, the stripe in the color of the finger.
+fn fill_lesson_keys(
+    keys: &[char],
+    layout: &crate::layout::Layout,
+    theme: &bevy::feathers::theme::UiTheme,
+    asset_server: &AssetServer,
+    root: Entity,
+    commands: &mut Commands,
+) {
+    commands.entity(root).despawn_children();
+    for c in keys {
+        spawn_keycap(commands, root, *c, layout, theme, asset_server, 1.0);
+    }
+}
+
+/// A key as on the keyboard, its stripe in the color of its finger, `scale` times the size of
+/// the keys of the toolbar.
+pub fn spawn_keycap(
+    commands: &mut Commands,
+    parent: Entity,
+    c: char,
+    layout: &crate::layout::Layout,
+    theme: &bevy::feathers::theme::UiTheme,
+    asset_server: &AssetServer,
+    scale: f32,
+) -> Entity {
+    let name = match c {
+        ' ' => "Space".to_string(),
+        crate::klavaro::UPSYM => "Enter".to_string(),
+        c => c.to_string(),
+    };
+    let finger = layout.locate(c).map_or(tokens::KEY_BORDER, |at| crate::keyboard::stripe_token(&layout.keys[at.key]));
+    commands
+        .spawn((
+            Node {
+                min_width: px(24.0 * scale),
+                height: px(26.0 * scale),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect { left: px(5.0 * scale), right: px(5.0 * scale), top: px(0), bottom: px(2.0 * scale) },
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(4.0 * scale)),
+                ..default()
+            },
+            BackgroundColor(theme.color(&tokens::KEY_BG)),
+            BorderColor::all(theme.color(&tokens::KEY_BORDER)),
+            Pickable::IGNORE,
+            ChildOf(parent),
+            children![
+                (
+                    Text::new(name),
+                    TextFont {
+                        font: bevy::text::FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::MONO)),
+                        font_size: FontSize::Px(13.0 * scale),
+                        ..default()
+                    },
+                    TextColor(theme.color(&tokens::KEY_TEXT)),
+                    Pickable::IGNORE,
+                ),
+                (
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(4.0 * scale),
+                        right: px(4.0 * scale),
+                        bottom: px(2.0 * scale),
+                        height: px(3.0 * scale),
+                        border_radius: BorderRadius::all(px(2.0 * scale)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.color(&finger)),
+                    Pickable::IGNORE,
+                ),
+            ],
+        ))
+        .id()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn update_lesson_label(
     exercise: Res<Exercise>,
     layout: Res<ActiveLayout>,
     progress: Res<Progress>,
     hanzi: Res<crate::hanzi::data::HanziData>,
+    theme: Res<bevy::feathers::theme::UiTheme>,
+    asset_server: Res<AssetServer>,
     mut labels: Query<&mut Text, With<LessonLabel>>,
+    roots: Query<Entity, With<LessonKeys>>,
+    mut shown: Local<Vec<char>>,
+    mut commands: Commands,
 ) {
-    if !exercise.is_changed() && !layout.is_changed() && !progress.is_changed() {
+    if !exercise.is_changed() && !layout.is_changed() && !progress.is_changed() && !theme.is_changed() {
         return;
     }
     let mode = if progress.mode.is_typing() { exercise.mode } else { progress.mode };
+    let keys = lesson_keys(mode, &exercise, &layout.0);
     let text = match mode {
         ExerciseMode::Basic => {
-            let chars: Vec<String> = exercise.char_set.iter().copied().map(display_char).collect();
-            format!("Lesson {}/{N_BASIC_LESSONS}: {}", exercise.lesson, chars.join(" "))
+            format!("Lesson {}/{N_BASIC_LESSONS}", exercise.lesson)
         }
         ExerciseMode::Layers => {
             let lessons = crate::course::layer_lessons(&layout.0);
             let name = lessons.get(exercise.lesson.saturating_sub(1)).map(|l| l.name.clone()).unwrap_or_default();
             format!("Layer lesson {}/{}: {name}", exercise.lesson, lessons.len())
         }
-        ExerciseMode::Review => {
-            let chars: Vec<String> = exercise.char_set.iter().copied().map(display_char).collect();
-            format!("Warm-up: {}", chars.join(" "))
-        }
+        ExerciseMode::Review => "Warm-up".into(),
         ExerciseMode::Adaptability => "Random words, your errors first".into(),
         ExerciseMode::Velocity => "Random words of the dictionary".into(),
         ExerciseMode::Fluidness => "Paragraphs, backspace fixes errors".into(),
+        ExerciseMode::Quotes => "Famous quotes and their authors".into(),
+        ExerciseMode::Affirmations => "Positive affirmations".into(),
         ExerciseMode::Custom if progress.pasted_text.trim().is_empty() => "Copy a text, then Paste text".into(),
         ExerciseMode::Custom => {
             let lines = crate::pasted::lines(&progress.pasted_text, |c| layout.0.locate(c).is_some());
             format!("Your text: part {}/{}", exercise.lesson, crate::pasted::parts(&lines))
         }
-        ExerciseMode::Fingers if exercise.finger == 5 => "Thumbs: Space and Enter".into(),
-        ExerciseMode::Fingers => {
-            let chars: Vec<String> = layout.0.finger_chars(exercise.finger).iter().map(|(c, _)| c.to_string()).collect();
-            format!("{}: {}", capitalize(finger_name(exercise.finger)), chars.join(" "))
-        }
-        ExerciseMode::BounceLeft | ExerciseMode::BounceRight => {
-            let (middle, columns) = crate::drills::bounce_keys(&layout.0, exercise.mode == ExerciseMode::BounceLeft);
-            let columns: Vec<String> = columns.iter().map(|c| c.iter().collect()).collect();
-            format!("{} + {} · aLtErNaTe", middle.iter().collect::<String>(), columns.join(" "))
-        }
+        ExerciseMode::Fingers if exercise.finger == 5 => "Thumbs".into(),
+        ExerciseMode::Fingers => capitalize(finger_name(exercise.finger)),
+        ExerciseMode::BounceLeft | ExerciseMode::BounceRight => "aLtErNaTe".into(),
         ExerciseMode::Shortcuts => "Esc, arrows, Ctrl, Alt".into(),
         ExerciseMode::Penmanship => {
             let lesson = progress.penmanship.lesson;
@@ -2460,13 +2927,72 @@ fn update_lesson_label(
             label.0.clone_from(&text);
         }
     }
+    if *shown != keys || layout.is_changed() || theme.is_changed() {
+        for root in &roots {
+            fill_lesson_keys(&keys, &layout.0, &theme, &asset_server, root, &mut commands);
+        }
+        *shown = keys;
+    }
 }
 
-/// The toolbar over the top of the window when it hides: with the setting or in the full
-/// screen, it shows while the pointer is near the top or on it, a panel is open, or a moment
-/// after a touch at the top.
+/// The tooltip of the button under the pointer, after a short rest, under the button and
+/// inside the window.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn show_tooltips(
+    hovers: Res<bevy::picking::hover::HoverMap>,
+    parents: Query<&ChildOf>,
+    tips: Query<(&Tooltip, &ComputedNode, &UiGlobalTransform, &InheritedVisibility)>,
+    mut boxes: Query<(&mut Node, &ComputedNode), With<TooltipBox>>,
+    mut texts: Query<&mut Text, With<TooltipText>>,
+    window: Single<&Window>,
+    time: Res<Time<Real>>,
+    mut over: Local<Option<(Entity, f64)>>,
+) {
+    let now = time.elapsed_secs_f64();
+    let hovered = hovers.values().flat_map(|hovered| hovered.keys()).find_map(|e| {
+        std::iter::successors(Some(*e), |e| parents.get(*e).ok().map(ChildOf::parent)).find(|e| tips.contains(*e))
+    });
+    match (hovered, *over) {
+        (Some(e), Some((was, _))) if e == was => {}
+        (Some(e), _) => *over = Some((e, now)),
+        (None, _) => *over = None,
+    }
+    let shown = over.filter(|(_, since)| now - since >= TOOLTIP_DELAY).and_then(|(e, _)| tips.get(e).ok()).filter(|(.., visible)| visible.get());
+    for (mut node, tip_size) in &mut boxes {
+        let Some((Tooltip(text), button, transform, _)) = shown else {
+            if node.display != Display::None {
+                node.display = Display::None;
+            }
+            continue;
+        };
+        for mut label in &mut texts {
+            if label.0 != *text {
+                label.0 = text.to_string();
+            }
+        }
+        let scale = button.inverse_scale_factor;
+        let (size, center) = (button.size() * scale, transform.translation * scale);
+        let width = tip_size.size().x * tip_size.inverse_scale_factor;
+        let window_width = window.physical_width() as f32 * scale;
+        node.display = Display::Flex;
+        node.left = px((center.x - width / 2.0).clamp(4.0, (window_width - width - 4.0).max(4.0)));
+        node.top = px(center.y + size.y / 2.0 + 6.0);
+    }
+}
+
+/// A finger that started at the top of the window and went down: the toolbar comes out.
+fn drags_down_from_the_top(start_y: f32, y: f32, scale: f32) -> bool {
+    start_y <= 96.0 * scale && y - start_y >= 24.0 * scale
+}
+
+/// The toolbar hides, with the setting or in the full screen over the top of the window, in the
+/// middle of an exercise keeping its place so that the text and the keyboard do not jump at the
+/// first key. It shows while the pointer is near the top or on it, a panel or one of its menus
+/// is open, or a moment after a touch at the top or a finger dragged down from there.
 #[allow(clippy::too_many_arguments)]
 fn show_toolbar(
+    exercise: Res<Exercise>,
+    drill: Res<Drill>,
     progress: Res<Progress>,
     panel: Res<Panel>,
     window: Single<&Window>,
@@ -2475,13 +3001,20 @@ fn show_toolbar(
     time: Res<Time<Real>>,
     hovers: Res<bevy::picking::hover::HoverMap>,
     parents: Query<&ChildOf>,
-    mut toolbars: Query<(Entity, &mut Node, &ComputedNode), With<Toolbar>>,
+    popups: Query<&Visibility, With<FeathersMenuPopup>>,
+    mut toolbars: Query<(Entity, &mut Node, &mut Visibility, &ComputedNode), (With<Toolbar>, Without<FeathersMenuPopup>)>,
     mut shown_until: Local<f64>,
 ) {
     let full_screen = !matches!(window.mode, bevy::window::WindowMode::Windowed);
     let hides = progress.auto_hide_toolbar || full_screen;
+    let in_lesson = match progress.mode {
+        ExerciseMode::Shortcuts => drill.done_steps > 0 && drill.finished.is_none(),
+        mode if mode.is_typing() => exercise.tutor.query == TutorQuery::ProcessTouches && !exercise.paused,
+        _ => false,
+    };
+    let menu_open = popups.iter().any(|visibility| *visibility != Visibility::Hidden);
     let now = time.elapsed_secs_f64();
-    for (toolbar, mut node, computed) in &mut toolbars {
+    for (toolbar, mut node, mut visibility, computed) in &mut toolbars {
         let position = if hides { PositionType::Absolute } else { PositionType::Relative };
         if node.position_type != position {
             node.position_type = position;
@@ -2489,21 +3022,63 @@ fn show_toolbar(
         // The height of the toolbar in the pixels of the window, a strip of 12 when hidden.
         let height = (computed.size().y * computed.inverse_scale_factor * scale.0).max(12.0);
         let near_top = window.cursor_position().is_some_and(|p| p.y <= height + 8.0);
-        let touched = touches.iter_just_pressed().any(|t| t.position().y <= 48.0 * scale.0);
+        let touched = touches.iter_just_pressed().any(|t| t.position().y <= 48.0 * scale.0)
+            || touches.iter().any(|t| drags_down_from_the_top(t.start_position().y, t.position().y, scale.0));
         // On the toolbar or its open menus, they hang below it.
         let on_it = hovers.values().flat_map(|hovered| hovered.keys()).any(|e| {
             std::iter::successors(Some(*e), |e| parents.get(*e).ok().map(ChildOf::parent)).any(|e| e == toolbar)
         });
-        if near_top || on_it || *panel != Panel::None {
+        if near_top || on_it || menu_open || *panel != Panel::None {
             *shown_until = now + 0.6;
         }
         if touched {
             *shown_until = now + 4.0;
         }
-        let display = if !hides || now < *shown_until { Display::Flex } else { Display::None };
+        let shown = now < *shown_until;
+        let display = if !hides || shown { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
         }
+        let wanted = if in_lesson && !shown { Visibility::Hidden } else { Visibility::Inherited };
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
+    }
+}
+
+/// The keys go to the exercise, never to the menus: Tab (with Alt or Ctrl too, Bevy does not
+/// look at them) would focus the first control, the "Touch typing" menu, then Space or Enter
+/// would open it. The same for a control left focused, by Esc closing its menu. In a panel Tab
+/// goes through its controls.
+fn keep_keys_off_the_menus(
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    panel: Res<Panel>,
+    time: Res<Time<Real>>,
+    popups: Query<&Visibility, With<FeathersMenuPopup>>,
+    mut focus: ResMut<InputFocus>,
+    mut visible: ResMut<bevy::input_focus::InputFocusVisible>,
+    mut focused_since: Local<Option<f64>>,
+) {
+    if *panel != Panel::None {
+        *focused_since = None;
+        return;
+    }
+    let menu_open = popups.iter().any(|visibility| *visibility != Visibility::Hidden);
+    let pressing = mouse.get_pressed().next().is_some() || touches.iter().next().is_some();
+    let tab = keys.just_pressed(KeyCode::Tab);
+    if !tab && (focus.get().is_none() || menu_open || pressing) {
+        *focused_since = None;
+        return;
+    }
+    // A click focuses a menu button before its menu opens: it has a moment.
+    let now = time.elapsed_secs_f64();
+    let since = *focused_since.get_or_insert(now);
+    if tab || now - since > 0.2 {
+        focus.clear();
+        visible.0 = false;
+        *focused_since = None;
     }
 }
 
@@ -2529,24 +3104,21 @@ fn update_live_stats(
     drill: Res<Drill>,
     progress: Res<Progress>,
     time: Res<Time<Real>>,
-    mut labels: Query<&mut Text, With<LiveStats>>,
-    mut bars: Query<&mut Node, With<ProgressBar>>,
+    mut labels: Query<&mut Text, (With<LiveStats>, Without<TimerText>)>,
+    mut timer_texts: Query<&mut Text, With<TimerText>>,
+    mut bars: Query<&mut Node, (With<ProgressBar>, Without<Timer>)>,
+    mut timers: Query<&mut Node, With<Timer>>,
 ) {
     let now = time.elapsed_secs_f64();
+    let started = !progress.mode.is_typing() || exercise.tutor.query != TutorQuery::Start;
+    let seconds = clock(if progress.mode.is_typing() { exercise.tutor.elapsed(now) } else { drill.elapsed(now) });
     let (text, done) = if progress.mode.is_typing() {
         let tutor = &exercise.tutor;
         let elapsed = tutor.elapsed(now);
         let correct = tutor.n_touchs.saturating_sub(tutor.n_errors);
         let wpm = if elapsed > 0.5 { 12.0 * correct as f64 / elapsed } else { 0.0 };
-        let accuracy = if tutor.n_touchs > 0 {
-            100.0 * (1.0 - tutor.n_errors as f64 / tutor.n_touchs as f64)
-        } else {
-            100.0
-        };
-        let mut text = format!("{wpm:.0} wpm  ·  {accuracy:.0}%  ·  {elapsed:.0}s");
-        if let Some(results) = tutor.results {
-            text.push_str(&format!("  ·  fluidness {:.0}%", results.fluidness));
-        } else if tutor.query == TutorQuery::Start {
+        let mut text = format!("{wpm:.0} wpm");
+        if tutor.query == TutorQuery::Start {
             text = "Type the first character to start".into();
         } else if tutor.retro_pos > 0 {
             text.push_str("  ·  ⌫ fix the errors");
@@ -2557,13 +3129,7 @@ fn update_live_stats(
         let text = if drill.is_away() {
             "Away, Alt+Tab back here".to_string()
         } else {
-            format!(
-                "{}/{} keys  ·  {} missed  ·  {:.0}s",
-                drill.done_steps,
-                drill.n_steps,
-                drill.missed_steps,
-                drill.elapsed(now)
-            )
+            format!("{}/{} keys  ·  {} missed", drill.done_steps, drill.n_steps, drill.missed_steps)
         };
         (text, 100.0 * drill.done_steps as f32 / drill.n_steps.max(1) as f32)
     };
@@ -2575,6 +3141,17 @@ fn update_live_stats(
     for mut node in &mut bars {
         node.width = percent(done);
     }
+    for mut label in &mut timer_texts {
+        if label.0 != seconds {
+            label.0.clone_from(&seconds);
+        }
+    }
+    let display = if started { Display::Flex } else { Display::None };
+    for mut node in &mut timers {
+        if node.display != display {
+            node.display = display;
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -2584,11 +3161,13 @@ fn update_message(
     progress: Res<Progress>,
     mut texts: ParamSet<(
         Query<(Entity, &mut Text), With<SummaryTitle>>,
-        Query<(Entity, &mut Text, &mut Node), With<AccuracyText>>,
-        Query<(Entity, &mut Text, &mut Node), With<VerdictText>>,
+        Query<(Entity, &mut Text), With<GradeName>>,
+        Query<&mut Node, With<GradeRow>>,
         Query<(&mut Text, &mut Node), With<RecordText>>,
         Query<(&mut Text, &mut Node), With<MessageText>>,
+        Query<&mut Node, With<SummaryHeader>>,
     )>,
+    mut stars: Query<(Entity, &GradeStar, &mut crate::icons::IconNode)>,
     mut commands: Commands,
 ) {
     if !exercise.is_changed() && !drill.is_changed() && !progress.is_changed() {
@@ -2597,7 +3176,7 @@ fn update_message(
     let summary = if progress.mode.is_typing() {
         summary(&exercise)
     } else {
-        Summary { title: "Round done".into(), tone: feathers_tokens::TEXT_MAIN, accuracy: None, verdict: None, record: None, notes: drill.summary.clone() }
+        Summary { title: "Round done".into(), tone: feathers_tokens::TEXT_MAIN, grade: None, record: None, notes: drill.summary.clone(), suggestion: false }
     };
     let set = |text: &mut Text, value: &str| {
         if text.0 != value {
@@ -2614,17 +3193,22 @@ fn update_message(
         set(&mut text, &summary.title);
         commands.entity(entity).insert(ThemeTextColor(summary.tone.clone()));
     }
-    for (entity, mut text, mut node) in &mut texts.p1() {
-        let (value, token) = summary.accuracy.clone().unwrap_or_default();
-        set(&mut text, &value);
-        show(&mut node, summary.accuracy.is_some());
-        commands.entity(entity).insert(ThemeTextColor(token));
+    for (entity, mut text) in &mut texts.p1() {
+        set(&mut text, summary.grade.map_or("", crate::lessons::Grade::name));
+        commands.entity(entity).insert(ThemeTextColor(summary.tone.clone()));
     }
-    for (entity, mut text, mut node) in &mut texts.p2() {
-        let (value, token) = summary.verdict.clone().unwrap_or_default();
-        set(&mut text, &value);
-        show(&mut node, summary.verdict.is_some());
-        commands.entity(entity).insert(ThemeTextColor(token));
+    for mut node in &mut texts.p2() {
+        show(&mut node, summary.grade.is_some());
+    }
+    let n_stars = summary.grade.map_or(0, |grade| grade as usize + 1);
+    for (entity, GradeStar(i), mut icon) in &mut stars {
+        use crate::icons::{Icon, IconTint};
+        let gained = *i < n_stars;
+        let wanted = if gained { Icon::Star } else { Icon::StarEmpty };
+        if icon.0 != wanted {
+            icon.0 = wanted;
+        }
+        commands.entity(entity).insert(IconTint(if gained { summary.tone.clone() } else { feathers_tokens::TEXT_DIM }));
     }
     for (mut text, mut node) in &mut texts.p3() {
         set(&mut text, summary.record.as_deref().unwrap_or_default());
@@ -2634,27 +3218,37 @@ fn update_message(
         set(&mut text, &summary.notes);
         show(&mut node, !summary.notes.is_empty());
     }
+    for mut node in &mut texts.p5() {
+        show(&mut node, !summary.title.is_empty());
+    }
 }
 
 /// The summary at the end of an exercise.
 #[derive(Debug, Clone, PartialEq)]
 struct Summary {
-    /// "Lesson 7 complete", "Left pinky drill: below the goal".
+    /// "Lesson 7 complete"; empty for an exercise failed, the rest of the screen tells.
     title: String,
-    /// The color of the title: green passed, amber below the goal.
+    /// The color of the title.
     tone: bevy::feathers::theme::ThemeToken,
-    /// "Accuracy 97.3%, the goal is 95%", green or red.
-    accuracy: Option<(String, bevy::feathers::theme::ThemeToken)>,
-    /// Where Enter goes: on to the next lesson in green, the same one again in amber.
-    verdict: Option<(String, bevy::feathers::theme::ThemeToken)>,
+    /// The grade gained, one to three stars.
+    grade: Option<crate::lessons::Grade>,
     record: Option<String>,
-    /// The keys to focus on, and the reason of the suggested drill.
+    /// The notes of the exercise.
     notes: String,
+    /// A finger drill is suggested, on its own line.
+    suggestion: bool,
+}
+
+impl Summary {
+    /// Nothing to say: a failed lesson without a tip, the rest of the screen tells.
+    fn is_empty(&self) -> bool {
+        self.title.is_empty() && self.grade.is_none() && self.record.is_none() && self.notes.is_empty() && !self.suggestion
+    }
 }
 
 impl Default for Summary {
     fn default() -> Self {
-        Summary { title: String::new(), tone: feathers_tokens::TEXT_MAIN, accuracy: None, verdict: None, record: None, notes: String::new() }
+        Summary { title: String::new(), tone: feathers_tokens::TEXT_MAIN, grade: None, record: None, notes: String::new(), suggestion: false }
     }
 }
 
@@ -2664,73 +3258,78 @@ fn summary(exercise: &Exercise) -> Summary {
         return Summary::default();
     };
     let mode = exercise.mode;
-    let goal = crate::game::goal(mode);
-    let passed = results.accuracy >= goal;
+    let grade = crate::lessons::Grade::of(results.accuracy, crate::game::goal(mode));
     let what = match mode {
+        ExerciseMode::Basic if exercise.words => format!("Words of lesson {}", exercise.lesson),
         ExerciseMode::Basic => format!("Lesson {}", exercise.lesson),
         ExerciseMode::Layers => format!("Layer lesson {}", exercise.lesson),
         ExerciseMode::Fingers => format!("{} drill", capitalize(finger_name(exercise.finger))),
         ExerciseMode::Review => "Warm-up".into(),
         _ => "Exercise".into(),
     };
-    let title = if passed { format!("{what} complete") } else { format!("{what}: below the goal") };
-    let accuracy = if results.n_errors == 0 {
-        ("100%, not a single error!".to_string(), tokens::CHAR_CORRECT)
-    } else if passed {
-        (format!("Accuracy {:.1}%, the goal is {goal:.0}%", results.accuracy), tokens::CHAR_CORRECT)
-    } else {
-        (format!("Accuracy {:.1}%, the goal is {goal:.0}%", results.accuracy), tokens::CHAR_WRONG)
-    };
-    let verdict = if passed {
-        match mode {
-            ExerciseMode::Basic if exercise.lesson < N_BASIC_LESSONS => format!("Enter goes on to lesson {}", exercise.lesson + 1),
-            ExerciseMode::Basic => "The basic course is done: Enter for one more text, the menu for the next exercise".into(),
-            ExerciseMode::Layers => "Enter goes on to the next layer lesson".into(),
-            ExerciseMode::Fingers => match crate::drills::next_finger(exercise.finger) {
-                Some(next) => format!("Enter goes on to the {} drill", finger_name(next)),
-                None => "Every finger has had its drill: Enter for another one".into(),
-            },
-            ExerciseMode::Review => "Enter goes on with the session".into(),
-            ExerciseMode::Custom => "Enter goes on to the next part".into(),
-            _ => "Enter starts a new text".into(),
-        }
-    } else {
-        match mode {
-            ExerciseMode::Basic | ExerciseMode::Layers => "Enter repeats the lesson".into(),
-            ExerciseMode::Fingers => "Enter repeats the drill".into(),
-            ExerciseMode::Review => "Enter goes on with the session".into(),
-            _ => "Enter: another text, the same exercise".into(),
-        }
-    };
-    let tone = if passed { tokens::CHAR_CORRECT } else { tokens::NEAR_MISS };
-    let mut lines: Vec<String> = exercise.message.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
-    if let Some((_, reason)) = &exercise.suggestion {
-        lines.push(capitalize(reason));
+    let title = if grade.is_some() { format!("{what} complete") } else { String::new() };
+    // The suggested drill has its own line, see [`update_suggestion`].
+    let lines: Vec<String> = exercise.message.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
+    Summary {
+        title,
+        tone: grade.map_or(feathers_tokens::TEXT_MAIN, crate::lessons::Grade::token),
+        grade,
+        record: exercise.record.clone(),
+        notes: lines.join("\n"),
+        suggestion: exercise.suggestion.is_some(),
     }
-    Summary { title, tone: tone.clone(), accuracy: Some(accuracy), verdict: Some((verdict, tone)), record: exercise.record.clone(), notes: lines.join("\n") }
 }
 
-/// ▲ better than the last time of the lesson, ▼ worse, ● the same, in words too.
-fn update_trends(
+/// The results of a typing exercise once it is over, in columns, the number before its unit
+/// ("12 wpm", "90% accuracy", "59% fluidness"): under each ▲ better than the last time of the
+/// lesson, ▼ worse, ● the same.
+#[allow(clippy::type_complexity)]
+fn update_end_stats(
     exercise: Res<Exercise>,
+    progress: Res<Progress>,
     theme: Res<bevy::feathers::theme::UiTheme>,
     asset_server: Res<AssetServer>,
-    mut rows: Query<&mut Node, With<TrendRow>>,
-    mut texts: Query<(&TrendText, &mut Text, &mut TextColor, &mut TextFont)>,
+    mut nodes: ParamSet<(
+        Query<&mut Node, With<EndStats>>,
+        Query<&mut Node, With<LiveStats>>,
+        Query<(&EndColumn, &mut Node)>,
+        Query<(&TrendText, &mut Text, &mut TextColor, &mut TextFont, &mut Node)>,
+    )>,
+    mut values: Query<(&EndValue, &mut Text), Without<TrendText>>,
 ) {
-    if !exercise.is_changed() {
+    if !exercise.is_changed() && !progress.is_changed() {
         return;
     }
-    let trend = exercise.trend.filter(|_| exercise.tutor.query == TutorQuery::End && exercise.mode.is_typing());
-    for mut row in &mut rows {
-        row.display = if trend.is_some() { Display::Flex } else { Display::None };
+    let results = exercise.tutor.results.filter(|_| exercise.tutor.query == TutorQuery::End && progress.mode.is_typing());
+    let show = |visible: bool| if visible { Display::Flex } else { Display::None };
+    for mut node in &mut nodes.p0() {
+        node.display = show(results.is_some());
     }
-    let Some(trend) = trend else {
+    for mut node in &mut nodes.p1() {
+        node.display = show(results.is_none());
+    }
+    let Some(results) = results else {
         return;
     };
-    for (TrendText(i), mut text, mut color, mut font) in &mut texts {
-        let diff = trend[*i];
-        let (name, unit, same) = [("WPM", "", 0.5), ("accuracy", "%", 0.5), ("fluidness", "%", 0.5)][*i];
+    let trend = exercise.trend;
+    for (_, mut node) in &mut nodes.p2() {
+        node.display = show(true);
+    }
+    for (EndValue(i), mut text) in &mut values {
+        text.0 = match i {
+            0 => format!("{:.0} wpm", results.velocity),
+            1 => format!("{}% accuracy", accuracy_shown(results.accuracy)),
+            _ => format!("{:.0}% fluidness", results.fluidness),
+        };
+    }
+    for (TrendText(i), mut text, mut color, mut font, mut node) in &mut nodes.p3() {
+        node.display = show(trend.is_some());
+        let Some(trend) = trend else {
+            continue;
+        };
+        // No "-0.0".
+        let diff = if trend[*i].abs() < 0.05 { 0.0 } else { trend[*i] };
+        let (unit, same) = [("", 0.5), ("%", 0.5), ("%", 0.5)][*i];
         let (mark, token) = if diff > same {
             ("▲", tokens::CHAR_CORRECT)
         } else if diff < -same {
@@ -2738,7 +3337,7 @@ fn update_trends(
         } else {
             ("●", tokens::NEAR_MISS)
         };
-        text.0 = format!("{mark} {name} {diff:+.1}{unit}");
+        text.0 = format!("{mark} {diff:+.1}{unit}");
         color.0 = theme.color(&token);
         font.font = bevy::text::FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::MONO));
         font.font_size = FontSize::Px(13.0);
@@ -2749,7 +3348,6 @@ fn update_trends(
 /// after a pause only: whoever knows it has pressed it by then, the help lists them all.
 #[allow(clippy::too_many_arguments)]
 fn update_actions(
-    exercise: Res<Exercise>,
     progress: Res<Progress>,
     drill: Res<Drill>,
     hanzi: Res<crate::hanzi::Practice>,
@@ -2772,17 +3370,12 @@ fn update_actions(
             }
         }
         ExerciseMode::Shortcuts => {
-            if drill.finished.is_some() {
-                if rested {
-                    actions.push("Enter another round".into());
-                }
-            } else {
+            if drill.finished.is_none() {
                 actions.push("Esc, the arrows and the shortcuts are the drill".into());
             }
         }
-        // The summary tells where Enter goes.
-        _ if exercise.tutor.query == TutorQuery::End => {}
-        _ => actions.push("Ctrl+Backspace clear the errors".into()),
+        // Any key goes on.
+        _ => {}
     }
     let text = actions.join("   ·   ");
     for mut label in &mut labels {
@@ -2844,7 +3437,7 @@ fn hanzi_rankings(progress: &Progress, data: &crate::hanzi::data::HanziData) -> 
     let glimpses: u32 = words.values().map(|s| s.glimpses).sum();
     let or_none = |v: Vec<String>, none: &str| if v.is_empty() { none.to_string() } else { v.join("   ") };
     format!(
-        "Weak words, a stroke was shown: {} (review them in the second menu)\nMost missed: {}\nBest written: {}\n{} words written, {} levels done · the strokes {} accurate · {glimpses} strokes shown",
+        "Weak words, a stroke was shown: {} (review them from the lessons)\nMost missed: {}\nBest written: {}\n{} words written, {} levels done · the strokes {} accurate · {glimpses} strokes shown",
         or_none(weak, "none"),
         or_none(missed, "none"),
         or_none(best, "not yet"),
@@ -2854,22 +3447,78 @@ fn hanzi_rankings(progress: &Progress, data: &crate::hanzi::data::HanziData) -> 
     )
 }
 
+/// The line of the suggested drill at the end: "[S] was missed **6** times." and the button
+/// "Train left ring finger", the finger underlined with a stripe in its color; or the weakest
+/// finger and its accuracy.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_suggestion(
     exercise: Res<Exercise>,
-    mut buttons: Query<&mut Node, With<SuggestButton>>,
-    mut captions: Query<&mut Text, With<SuggestCaption>>,
+    layout: Res<ActiveLayout>,
+    theme: Res<bevy::feathers::theme::UiTheme>,
+    asset_server: Res<AssetServer>,
+    mut rows: Query<&mut Node, With<SuggestRow>>,
+    keys: Query<Entity, With<SuggestKey>>,
+    mut texts: ParamSet<(
+        Query<(Entity, &mut Text, &TextFont), With<SuggestText>>,
+        Query<(&mut TextSpan, &mut TextColor), With<SuggestCount>>,
+        Query<(&mut TextSpan, &mut TextColor), (With<SuggestTail>, Without<SuggestCount>)>,
+        Query<&mut Text, (With<SuggestCaption>, Without<SuggestText>)>,
+        Query<&mut BackgroundColor, With<SuggestFinger>>,
+    )>,
+    mut spawned: Local<bool>,
+    mut commands: Commands,
 ) {
-    if !exercise.is_changed() {
+    // The spans of the text and of the caption, once.
+    if !*spawned {
+        let Ok((text, font)) = texts.p0().single().map(|(e, _, f)| (e, f.clone())) else {
+            return;
+        };
+        let bold = TextFont { font: bevy::text::FontSource::Handle(asset_server.load(bevy::feathers::constants::fonts::BOLD)), ..font.clone() };
+        commands.spawn((TextSpan::new(""), bold, ChildOf(text), SuggestCount));
+        commands.spawn((TextSpan::new(""), font, ChildOf(text), SuggestTail));
+        *spawned = true;
         return;
     }
-    let suggestion = exercise.suggestion.as_ref().filter(|_| exercise.tutor.query == TutorQuery::End);
-    for mut node in &mut buttons {
+    if !exercise.is_changed() && !theme.is_changed() {
+        return;
+    }
+    let suggestion = exercise.suggestion.filter(|_| exercise.tutor.query == TutorQuery::End);
+    for mut node in &mut rows {
         node.display = if suggestion.is_some() { Display::Flex } else { Display::None };
     }
-    if let Some((finger, _)) = suggestion {
-        for mut caption in &mut captions {
-            caption.0 = format!("Train the {}", finger_name(*finger));
+    let Some(suggestion) = suggestion else {
+        return;
+    };
+    use crate::game::Reason;
+    let (key, head, count, tail) = match suggestion.reason {
+        Reason::Missed { key, times } => (Some(key), "was missed ", times.to_string(), if times == 1 { " time." } else { " times." }),
+        Reason::Weakest { accuracy } => (None, "Weakest finger at ", format!("{accuracy:.0}%"), "."),
+    };
+    for root in &keys {
+        commands.entity(root).despawn_children();
+        if let Some(key) = key {
+            spawn_keycap(&mut commands, root, key, &layout.0, &theme, &asset_server, 1.0);
         }
+    }
+    for (_, mut text, _) in &mut texts.p0() {
+        text.0 = head.to_string();
+    }
+    // The spans in the color of the label, not the white of a text without a theme.
+    let ink = theme.color(&feathers_tokens::TEXT_MAIN);
+    for (mut span, mut color) in &mut texts.p1() {
+        span.0.clone_from(&count);
+        color.0 = ink;
+    }
+    for (mut span, mut color) in &mut texts.p2() {
+        span.0 = tail.to_string();
+        color.0 = ink;
+    }
+    let finger_color = theme.color(&tokens::FINGERS[(suggestion.finger as usize).min(9)]);
+    for mut caption in &mut texts.p3() {
+        caption.0 = finger_name(suggestion.finger).to_string();
+    }
+    for mut stripe in &mut texts.p4() {
+        stripe.0 = finger_color;
     }
 }
 
@@ -2938,6 +3587,80 @@ fn update_rankings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A window, the first control of the toolbar and a key press through the real focus plugins.
+    fn tab_press(keep_off: bool) -> Option<Entity> {
+        use bevy::input::ButtonState;
+        use bevy::input::keyboard::{Key, KeyboardInput};
+        use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
+        use bevy::input_focus::{InputDispatchPlugin, InputFocusPlugin};
+        use bevy::window::PrimaryWindow;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::input::InputPlugin, InputFocusPlugin, InputDispatchPlugin, TabNavigationPlugin))
+            .init_resource::<Panel>();
+        if keep_off {
+            app.add_systems(Update, keep_keys_off_the_menus);
+        }
+        let window = app.world_mut().spawn((Window::default(), PrimaryWindow)).id();
+        let root = app.world_mut().spawn(TabGroup::default()).id();
+        let menu = app.world_mut().spawn((TabIndex(0), ChildOf(root))).id();
+        app.update();
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Tab,
+            logical_key: Key::Tab,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window,
+        });
+        app.update();
+        let focused = app.world().resource::<InputFocus>().get();
+        assert!(focused.is_none() || focused == Some(menu));
+        focused
+    }
+
+    #[test]
+    fn tab_does_not_leave_the_keys_on_the_first_menu() {
+        // Without the system it does, the reason of the system.
+        assert!(tab_press(false).is_some());
+        assert_eq!(tab_press(true), None);
+    }
+
+    #[test]
+    fn the_accuracy_shown_never_rounds_up_to_a_pass() {
+        assert_eq!(accuracy_shown(94.8), 94);
+        assert_eq!(accuracy_shown(95.0), 95);
+        assert_eq!(accuracy_shown(99.96), 99);
+        assert_eq!(accuracy_shown(100.0), 100);
+    }
+
+    #[test]
+    fn the_clock_is_minutes_and_seconds_with_zeros() {
+        assert_eq!(clock(0.0), "00:00");
+        assert_eq!(clock(5.9), "00:05");
+        assert_eq!(clock(65.0), "01:05");
+        assert_eq!(clock(600.0), "10:00");
+        assert_eq!(clock(6000.0), "100:00");
+    }
+
+    #[test]
+    fn a_close_miss_shows_on_the_accuracy_line() {
+        let (fill, mark) = accuracy_line(94.8, 95.0);
+        // 0.8% of the 608 pixels of the line, about 5: more than the mark's width.
+        assert!(mark - fill > 0.7 && mark - fill < 0.9, "{fill} {mark}");
+        assert_eq!(accuracy_line(100.0, 95.0).0, 100.0);
+        assert_eq!(accuracy_line(40.0, 95.0).0, 0.0);
+        assert_eq!(accuracy_line(95.0, 95.0).0, accuracy_line(95.0, 95.0).1);
+    }
+
+    #[test]
+    fn only_a_drag_down_from_the_top_brings_out_the_toolbar() {
+        assert!(drags_down_from_the_top(10.0, 60.0, 1.0));
+        // A tap, a drag up, a drag from the middle of the screen.
+        assert!(!drags_down_from_the_top(10.0, 12.0, 1.0));
+        assert!(!drags_down_from_the_top(60.0, 10.0, 1.0));
+        assert!(!drags_down_from_the_top(300.0, 400.0, 1.0));
+    }
     use crate::progress::Session;
 
     fn session(mode: ExerciseMode, lesson: Option<usize>, accuracy: f64, finished_at: u64) -> Session {

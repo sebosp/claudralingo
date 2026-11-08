@@ -14,8 +14,18 @@ fn main() {
         // SAFETY: before any thread is started.
         unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
     }
+    // The integrated GPU: a discrete one awake costs a laptop about 20 W, and nothing here needs
+    // it. The setting takes the discrete one, read here as the GPU is chosen once, at the start;
+    // `WGPU_POWER_PREF` goes over the setting.
+    let power_preference = PowerPreference::from_env().unwrap_or(
+        if claudralingo::progress::Progress::load().discrete_gpu {
+            PowerPreference::HighPerformance
+        } else {
+            PowerPreference::LowPower
+        },
+    );
     #[cfg(target_os = "linux")]
-    leave_nvidia_asleep();
+    leave_nvidia_asleep(power_preference);
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -33,11 +43,8 @@ fn main() {
                 ..default()
             })
             .set(RenderPlugin {
-                // The integrated GPU: a discrete one awake costs a laptop about 20 W, and nothing
-                // here needs it. `WGPU_POWER_PREF=high` still picks the discrete one.
                 render_creation: WgpuSettings {
-                    power_preference: PowerPreference::from_env()
-                        .unwrap_or(PowerPreference::LowPower),
+                    power_preference,
                     ..default()
                 }
                 .into(),
@@ -56,14 +63,14 @@ fn main() {
 
 /// Keeps a discrete NVIDIA GPU asleep when another GPU can draw: the Vulkan loader starts every
 /// driver to list the GPUs, and the NVIDIA one stays awake (about 20 W on a laptop) even with the
-/// integrated GPU picked. `WGPU_POWER_PREF=high` or any choice of Vulkan driver in the environment
-/// keeps all of them.
+/// integrated GPU picked. Preferring the discrete GPU or any choice of Vulkan driver in the
+/// environment keeps all of them.
 #[cfg(target_os = "linux")]
-fn leave_nvidia_asleep() {
+fn leave_nvidia_asleep(power_preference: PowerPreference) {
     let chosen = ["VK_LOADER_DRIVERS_DISABLE", "VK_LOADER_DRIVERS_SELECT", "VK_DRIVER_FILES", "VK_ICD_FILENAMES"]
         .iter()
         .any(|name| std::env::var_os(name).is_some());
-    if chosen || std::env::var("WGPU_POWER_PREF").is_ok_and(|pref| pref == "high") {
+    if chosen || power_preference == PowerPreference::HighPerformance {
         return;
     }
     let vendors: Vec<String> = std::fs::read_dir("/sys/class/drm")
@@ -304,7 +311,7 @@ mod snapshot {
         mut exit: MessageWriter<AppExit>,
         mut theme: ResMut<claudralingo::theme::ThemeMode>,
         mut keyboard: ResMut<claudralingo::keyboard::KeyboardView>,
-        mut panel: ResMut<claudralingo::ui::Panel>,
+        (mut panel, mut settings_tab): (ResMut<claudralingo::ui::Panel>, ResMut<claudralingo::ui::SettingsTab>),
         layout: Res<claudralingo::game::ActiveLayout>,
         (progress, hanzi_data, hanzi, pen): (
             Res<claudralingo::progress::Progress>,
@@ -323,17 +330,23 @@ mod snapshot {
                 _ => claudralingo::theme::ThemeMode::Light,
             };
         }
-        // The help of the first start, kept with `CLAUDRALINGO_HELP`, `CLAUDRALINGO_SETTINGS`
-        // opens the settings, `CLAUDRALINGO_LESSONS` the lessons.
+        // The main menu of the start, kept with `CLAUDRALINGO_HOME`; `CLAUDRALINGO_HELP` the help,
+        // `CLAUDRALINGO_SETTINGS` the settings, `CLAUDRALINGO_LESSONS` the lessons.
         if *frame == 45 {
-            if std::env::var_os("CLAUDRALINGO_SETTINGS").is_some() {
+            if let Some(tab) = std::env::var_os("CLAUDRALINGO_SETTINGS") {
                 *panel = claudralingo::ui::Panel::Settings;
+                // `CLAUDRALINGO_SETTINGS=typing` opens the tab of the touch typing.
+                if tab == "typing" {
+                    *settings_tab = claudralingo::ui::SettingsTab::Typing;
+                }
             } else if std::env::var_os("CLAUDRALINGO_LESSONS").is_some() {
                 *panel = claudralingo::ui::Panel::Lessons;
             } else if std::env::var_os("CLAUDRALINGO_STATS").is_some() {
                 *panel = claudralingo::ui::Panel::Stats;
             } else if std::env::var_os("CLAUDRALINGO_PRINT").is_some() {
                 *panel = claudralingo::ui::Panel::Print;
+            } else if std::env::var_os("CLAUDRALINGO_HOME").is_some() {
+                *panel = claudralingo::ui::Panel::Home;
             } else if std::env::var_os("CLAUDRALINGO_HELP").is_none() {
                 *panel = claudralingo::ui::Panel::None;
             }

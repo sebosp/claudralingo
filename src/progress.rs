@@ -29,6 +29,10 @@ pub enum ExerciseMode {
     Adaptability,
     Velocity,
     Fluidness,
+    /// Famous quotes with their authors, see [`crate::quotes`].
+    Quotes,
+    /// Positive affirmations, see [`crate::quotes`].
+    Affirmations,
     /// A text pasted by the user, see [`crate::pasted`].
     Custom,
     /// The keys of one finger, up and down its column.
@@ -45,13 +49,15 @@ pub enum ExerciseMode {
 }
 
 impl ExerciseMode {
-    pub const ALL: [ExerciseMode; 13] = [
+    pub const ALL: [ExerciseMode; 15] = [
         ExerciseMode::Basic,
         ExerciseMode::Layers,
         ExerciseMode::Review,
         ExerciseMode::Adaptability,
         ExerciseMode::Velocity,
         ExerciseMode::Fluidness,
+        ExerciseMode::Quotes,
+        ExerciseMode::Affirmations,
         ExerciseMode::Custom,
         ExerciseMode::Fingers,
         ExerciseMode::BounceLeft,
@@ -69,6 +75,8 @@ impl ExerciseMode {
             ExerciseMode::Adaptability => "Adaptability",
             ExerciseMode::Velocity => "Velocity",
             ExerciseMode::Fluidness => "Fluidness",
+            ExerciseMode::Quotes => "Quotes",
+            ExerciseMode::Affirmations => "Affirmations",
             ExerciseMode::Custom => "Your text (paste)",
             ExerciseMode::Fingers => "Finger drill",
             ExerciseMode::BounceLeft => "Left hand finger bounce",
@@ -93,8 +101,7 @@ impl ExerciseMode {
     }
 }
 
-/// What is learned, the first menu: each has its exercises or lessons in the second menu, its
-/// own lessons panel and statistics.
+/// What is learned, a card of the main menu: each has its own lessons panel and statistics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Subject {
     #[default]
@@ -114,12 +121,12 @@ impl Subject {
         }
     }
 
-    /// The exercises of the second menu.
+    /// The exercises of the subject.
     pub fn modes(self) -> &'static [ExerciseMode] {
         match self {
-            Subject::Typing => &ExerciseMode::ALL[..11],
-            Subject::Hanzi => &ExerciseMode::ALL[11..12],
-            Subject::Penmanship => &ExerciseMode::ALL[12..],
+            Subject::Typing => &ExerciseMode::ALL[..13],
+            Subject::Hanzi => &ExerciseMode::ALL[13..14],
+            Subject::Penmanship => &ExerciseMode::ALL[14..],
         }
     }
 }
@@ -305,6 +312,11 @@ pub struct Progress {
     /// No drifting background, no sparks, shakes nor breathing keys.
     pub reduce_motion: bool,
     pub show_hands: bool,
+    /// The on-screen keyboard under the text.
+    pub show_keyboard: bool,
+    /// A click on every key typed, in the sound of a mechanical switch.
+    pub key_clicks: bool,
+    pub switch: crate::sounds::Switch,
     /// A bigger text to type, for the tired or weaker eyes.
     pub large_text: bool,
     /// The window is scaled to fit its size, see [`crate::zoom`].
@@ -338,7 +350,14 @@ pub struct Progress {
     /// A wrong key moves on and is fixed with Backspace (the motion to learn on a Corne);
     /// off, the cursor waits on the missed key.
     pub fix_with_backspace: bool,
+    /// Draws on the discrete GPU instead of the integrated one, from the next start. Off, a laptop's
+    /// battery lasts longer.
+    pub discrete_gpu: bool,
     pub layouts: BTreeMap<String, LayoutProgress>,
+    /// The basic lesson whose drill was just passed: its real words come next, see
+    /// [`crate::game::basic_words`]. Not saved, a new start begins with the next drill.
+    #[serde(skip)]
+    pub words_of: Option<usize>,
 }
 
 /// The progress of the hanzi mode, whatever the keyboard.
@@ -400,6 +419,9 @@ impl Default for Progress {
             background: BackgroundLevel::default(),
             reduce_motion: false,
             show_hands: true,
+            show_keyboard: true,
+            key_clicks: false,
+            switch: crate::sounds::Switch::default(),
             large_text: false,
             fit_window: true,
             zoom_factor: 1.0,
@@ -417,7 +439,9 @@ impl Default for Progress {
             daily_goal_minutes: 10,
             compact: cfg!(any(target_os = "android", target_os = "ios")),
             fix_with_backspace: true,
+            discrete_gpu: false,
             layouts: BTreeMap::new(),
+            words_of: None,
         }
     }
 }

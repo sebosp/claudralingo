@@ -1,4 +1,4 @@
-//! The statistics panel, of the subject of the first menu, the touch typing or the hanzi: today
+//! The statistics panel, of the subject of the moment, the touch typing or the hanzi: today
 //! and the streak of days with the daily goal met, the calendars of this month and the previous
 //! one (a day is a success when a lesson was passed), the words per minute and the accuracy of
 //! the last 30 days (the accuracy of the strokes and the strokes right on the first try for the
@@ -301,6 +301,40 @@ fn ago_in(seconds: u64, now: u64, offset: i64, offset_now: i64) -> String {
     let month = &MONTHS[m as usize - 1][..3];
     let (hour, minute) = ((local % SECONDS_PER_DAY) / 3600, (local % 3600) / 60);
     if y == this_year { format!("{month} {d}, {hour:02}:{minute:02}") } else { format!("{month} {d} {y}, {hour:02}:{minute:02}") }
+}
+
+/// When a moment was, short: "just now", "5 mins ago", "3 hours ago", "yesterday", "2 days ago",
+/// "last week", "3 weeks ago" within a month; then the day, "Nov 6", and past a year the month,
+/// "Nov 2025".
+pub fn relative_date(seconds: u64, now: u64) -> String {
+    relative_date_in(seconds, now, local_offset(seconds), local_offset(now))
+}
+
+fn relative_date_in(seconds: u64, now: u64, offset: i64, offset_now: i64) -> String {
+    const MONTH_DAYS: u64 = 30;
+    let elapsed = now.saturating_sub(seconds);
+    let plural = |n: u64, unit: &str| if n == 1 { format!("1 {unit} ago") } else { format!("{n} {unit}s ago") };
+    if elapsed < 60 {
+        return "just now".into();
+    }
+    if elapsed < 3600 {
+        return plural(elapsed / 60, "min");
+    }
+    if elapsed < SECONDS_PER_DAY {
+        return plural(elapsed / 3600, "hour");
+    }
+    let local_day = |t: u64, offset: i64| day_of(t.saturating_add_signed(offset));
+    let days = local_day(now, offset_now).saturating_sub(local_day(seconds, offset)).max(1);
+    let (y, m, d) = civil(day_of(seconds.saturating_add_signed(offset)));
+    let month = &MONTHS[m as usize - 1][..3];
+    match days {
+        1 => "yesterday".into(),
+        2..=6 => plural(days, "day"),
+        7..=13 => "last week".into(),
+        14..MONTH_DAYS => plural(days / 7, "week"),
+        _ if days < 365 => format!("{month} {d}"),
+        _ => format!("{month} {y}"),
+    }
 }
 
 const MONTHS: [&str; 12] =
@@ -710,6 +744,24 @@ mod tests {
         // A Thursday: Monday is 0.
         assert_eq!((d + 3) % 7, 3);
         assert_eq!(civil(days_from_civil(2024, 2, 29)), (2024, 2, 29));
+    }
+
+    #[test]
+    fn the_dates_are_relative_within_a_month() {
+        let then = 1_793_000_000;
+        let at = |s: u64| relative_date_in(then, then + s, 3600, 3600);
+        assert_eq!(at(10), "just now");
+        assert_eq!(at(5 * 60), "5 mins ago");
+        assert_eq!(at(60), "1 min ago");
+        assert_eq!(at(5 * 3600 + 10), "5 hours ago");
+        assert_eq!(at(SECONDS_PER_DAY + 3600), "yesterday");
+        assert_eq!(at(2 * SECONDS_PER_DAY), "2 days ago");
+        assert_eq!(at(8 * SECONDS_PER_DAY), "last week");
+        assert_eq!(at(16 * SECONDS_PER_DAY), "2 weeks ago");
+        let (_, m, d) = civil(day_of(then + 3600));
+        assert_eq!(at(40 * SECONDS_PER_DAY), format!("{} {d}", &MONTHS[m as usize - 1][..3]));
+        let (y, m, _) = civil(day_of(then + 3600));
+        assert_eq!(at(400 * SECONDS_PER_DAY), format!("{} {y}", &MONTHS[m as usize - 1][..3]));
     }
 
     #[test]

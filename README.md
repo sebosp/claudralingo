@@ -53,15 +53,24 @@ The lessons on their path, graded Good, Great or Legendary, the ones ahead dim:
 3. **Penmanship (now, the small letters).** Spencerian script and Copperplate on their guide
    sheets, see [Penmanship](#penmanship). What comes next is in `TODO.md`.
 
-## Menus and toolbar
+## Main menu and toolbar
 
-The first menu of the toolbar is what you learn, Touch typing, Hanzi or Penmanship; the second
-one its exercise (touch typing) or its HSK level and the weak words (hanzi). ‹ › go through the
-lessons of the exercise: the basic or the layer lesson, the finger, the hand of the bounces, the
-level within the HSK level. They are grayed out at the ends, before a locked lesson and in the
-exercises without lessons. Then the icons: the circling arrow (F5) starts the text, the word or
-the figure again, the notebook opens the lessons and the bars the stats (those of the first
-menu), the gear the settings, `?` the help. The app opens on the exercise of the last session.
+The app opens on the main menu: a column in the middle of the window, a row each for Touch
+typing, Hanzi and Penmanship, then Settings and Stats with their icons; the rows share the height
+(a tap on a phone goes in), the subject of the last session framed. Each subject shows its
+points, a lesson Good 1, Great 2, Legendary 3 ("31/198 points earned."), and a bar in three
+parts, green, purple and gold, each a faint vial filling with the lessons that reached that
+grade. The settings and the stats opened from there come back to it once closed. The house of
+the toolbar (Main menu) comes back to it, Esc closes it.
+
+In the toolbar the lesson sits in the middle on one line, its name and its keys between ‹ and ›.
+
+In the toolbar, ‹ › go through the lessons of the exercise: the basic or the layer lesson, the
+finger, the hand of the bounces, the level within the HSK level. They are grayed out at the ends,
+before a locked lesson and in the exercises without lessons. Then the icons: the circling arrow
+(Refresh, F5) starts the text, the word or the figure again, the notebook opens the lessons (every
+exercise of the subject is there, see Lessons) and the bars the stats, the gear the settings, `?`
+the help. The pointer resting on a button names it.
 
 The bar at the bottom shows the keys of the moment. At the end of a typing exercise it is empty,
 the summary says where Enter goes; in the hanzi and the penmanship the key to go on with appears
@@ -82,6 +91,8 @@ The four Klavaro exercises, with their original texts and goals, and two of Clau
 | Adaptability     | random weird words, made of your worst keys when needed    | 98% accuracy                       |
 | Velocity         | random words of Klavaro's dictionary                       | 95% accuracy, 50 WPM               |
 | Fluidness        | paragraphs of a text                                       | 97% accuracy, 50 WPM, 70% fluidity |
+| Quotes           | three famous quotes with their authors                     | 95% accuracy                       |
+| Affirmations     | six positive affirmations                                  | 95% accuracy                       |
 | Finger drill     | the keys of one finger, up and down its column, four lines | 95% accuracy, Enter: the next finger |
 | Finger bounce    | middle and index of one hand in turns, alternating case    | 95% accuracy, slower is expected   |
 | Shortcuts & keys | Esc, editing shortcuts, arrows, numbers, symbols, Alt+Tab  | every key on the first try         |
@@ -91,8 +102,8 @@ Differences to Klavaro:
 - **Backspace works in every exercise.** Klavaro only allows it in the fluidness exercises
   (`tutor_eval_forward_backward`), the other ones beep. As in Klavaro's fluidness, a wrong key
   moves forward and blocks the progress until the errors are erased, only the errors can be
-  erased, and the characters retyped after a correction count as errors. Ctrl+Backspace erases
-  all the errors.
+  erased, and the characters retyped after a correction count as errors. Klavaro's Ctrl+Backspace,
+  all the errors at once, is left out: F5 starts the exercise over.
 - The first key starts the timer, there is no "press any key" intro.
 - The misses and touch times are recorded in the basic course too.
 - At the end of an exercise Enter starts the next one, Backspace goes back one basic lesson, as in
@@ -230,9 +241,12 @@ keymap away, see `corne36` in `src/layout.rs`.
 
 - **Layer course** (mode): the keys of each layer row by row (Lower: top row, home row...), then
   the layer whole, then all the layers. A keyboard without layers has its symbols instead.
-- **Real words**: a basic lesson ends with two lines of real words made of the keys learned so
-  far, each with a key new in the lesson (or of the lesson, for the reviews like lesson 10), when
-  they make 12 words or more. The words come from the 39,000 common English words of SCOWL
+- **Real words**: a basic lesson passed is followed by an exercise of its own, two lines of real
+  words made of the keys learned so far, each with a key new in the lesson (or of the lesson, for
+  the reviews like lesson 10), when they make 12 words or more. They are practice: the drill
+  opened the next lesson already, passed or not the words go on to it, and the arrow at their
+  right skips them. Their sessions count in the minutes of the day, not in the grade of the
+  lesson. The words come from the 39,000 common English words of SCOWL
   (`data/scowl`), the most common ones more often and no word twice in the two lines: lesson 10
   has 64 of them (ash, gas, fad, flask, salad...), the top row lessons thousands.
 - **Your text** (mode): Paste text in the toolbar types the text of the clipboard, six lines at a
@@ -246,9 +260,18 @@ keymap away, see `corne36` in `src/layout.rs`.
 - **Sounds** (setting, off by default): a bell on a miss, a chime on a line without a slip and a
   chord on a passed exercise, a falling tone for a key held too long by the auto shift, all
   synthesized (`src/sounds.rs`).
+- **Key clicks** (setting, off by default): a click on every key, in the sound of a blue
+  (clicky), brown (tactile) or red (linear) switch, synthesized from noise and short rings, a
+  little higher or lower each time.
+- **Pause**: ten seconds without a key in the middle of an exercise, the screen frosts over and
+  the clock stops from the last key: the wait counts neither in the time nor in the words per
+  minute. Enter goes on.
+- **Legends by grade** (with "Fade legends"): the higher the grade of the lesson, the less the
+  letters of the keyboard show, none once it is Legendary; the keys typed still light up.
+  "Show the keyboard" and "Show the fingers" in the settings hide them altogether.
 - **Last time**: the first line of the stats is the last exercise with its accuracy against its
   goal and how long ago it was (5 minutes ago, yesterday, 10 days ago, past 15 days the day and
-  the time), and the exercise up next. "Warm-up: weak keys" in the second menu drills the keys
+  the time), and the exercise up next. "Warm-up: weak keys" in the lessons drills the keys
   that need it most, their misses weighing more when they were not practiced for a while (a
   spaced repetition), then goes back to the lesson.
 - **Locked lessons** (setting, on by default): a lesson of the basic and the layer course, and a
@@ -267,10 +290,17 @@ to the last right character: the motion to learn on a Corne. A slip is one error
 keys follow it. Settings, "Fix mistakes with Backspace" off: the cursor waits on the missed key
 instead. At the end, the bar at the top shows the
 words per minute, the accuracy and the fluidness, with ▲ (better), ▼ (worse) or ● (the same)
-against the last time of the same lesson. Under it the summary: "Lesson 7 complete" or "Lesson
+against the last time of the same lesson, and under each a small chart of its last 20 sessions,
+the one just typed a dot, and a dashed reference named at its left: the average typist, 52 wpm
+(51.56 over 168,000 volunteers, [Dhakal et al., CHI 2018](https://userinterfaces.aalto.fi/136Mkeystrokes/)),
+the accuracy to pass the exercise, and Klavaro's fluidness goal of 70%; the fingers under the keyboard make
+room for them. Under it the summary: "Lesson 7 complete" or "Lesson
 7: below the goal", the accuracy against the goal, then where Enter goes, green when it goes on
 to the next lesson or the next finger, amber when it repeats the same one; a new best speed for
-the lesson is congratulated in green with the gain and the date of the previous record. The keys
+the lesson is congratulated in green with the gain and when the previous record was ("2 days
+ago", "last week"; past a month the day, past a year the month). A key missed three times or
+more is shown as on the keyboard: "[s] was missed **6** times.", beside the button that trains
+its finger, the name of the finger underlined in its color. The keys
 of the moment are in the help (F1): Enter, Backspace, Tab, ← → for the lessons. The arrows change the lesson only before the
 first key and at the end: hit by mistake in the middle of an exercise (they sit under the letters
 on the small keyboards) they would throw it away; the ‹ › buttons work at any time. While a wrong key waits for Backspace the line
@@ -278,9 +308,10 @@ of the first error stays on the screen, also a wrong key on the ¶ at its end: i
 
 ## Lessons
 
-The notebook of the toolbar shows the lessons of the first menu on a path: a node per course or
-HSK level (the basic course, the layer course, the finger drills; HSK 1 to 4; the small
-letters), the line under it filling with the lessons passed, the node in the color of the grade
+The notebook of the toolbar shows the lessons of the subject on a path: a node per course or
+HSK level (the basic course, the layer course, the finger drills, the exercises without lessons
+graded by their best session, the free practice of the warm-up and your text; HSK 1 to 4 and the
+weak words; the small letters), the line under it filling with the lessons passed, the node in the color of the grade
 once all of them are. A passed lesson is graded as the games do: Good from the goal of the
 exercise, Great from 98% (90% of the strokes on the first try in the penmanship, four misses at
 most on the ten words of a hanzi level), Legendary without a single error; green, purple and
@@ -325,7 +356,7 @@ with the progress.
 
 ## Stats
 
-The Stats button, of the first menu: today's minutes against the daily goal (10 minutes) and the
+The Stats button, of the subject: today's minutes against the daily goal (10 minutes) and the
 streak of days that met it, the calendars of this month and the previous one (green: a lesson
 passed that day), the words per minute and the accuracy of the last 30 days (point at a day for
 its value, the goal of 95% dashed), the exercises by type, and your best and most missed keys.
@@ -351,10 +382,15 @@ start lower: eight writes from ten words, six from thirty, five from a hundred. 
 screen is the one spoken: the next word is said when it comes up. Before the first trace of a
 word the brush writes it before the eyes, stroke by stroke (a pen down skips it). The bar over
 the drawing fills with the writes, the pinyin the last step; the word and "Well done" glow
-green once a write is done, to sink in. Settings, "Hanzi writes": the writes of a new word, auto
-(ten, fewer as you learn) or a count up to a hundred. Beside the drawing: what
-to do now, the stroke it is at ("Stroke 2 of 6", with its kind while the outline is there), and
-the last stroke's accuracy in green or the miss in red. The pinyin is typed in a field with a
+green once a write is done, to sink in, and the word is written again on the drawing in green,
+as slowly as the intro, flashes three times and fades out over two seconds: the next write
+starts on a clean drawing (a pen down skips it, as "Reduce motion"). Settings, "Hanzi writes":
+the writes of a new word, auto (ten, fewer as you learn) or a count up to a hundred. Beside the
+drawing, a column as high as it: the word, its pinyin and its meaning in the top quarter; the
+strokes of the character in the middle half, a line each with its name in bold and what it is
+("横 héng horizontal"), the next one bright with how to write it (all of them while the outline
+is there, only the ones written from memory); what to do now and the last stroke's accuracy in
+green or the miss in red in the bottom quarter, over the buttons. The pinyin is typed in a field with a
 blinking caret: the keys go there.
 
 A stroke is compared with the strokes of the character as Hanzi Writer does (a port of its
@@ -363,7 +399,7 @@ drawn backwards or out of order is named. An accepted stroke gets its accuracy, 
 to the target (both resampled along their length, the mean distance and the distances of their
 ends): "横 92%, excellent". After three misses on a stroke it is written before the eyes, the
 glimpse (Hint too): a penalty, it counts as two misses in the accuracy of the word, and the word
-becomes weak. "Weak words" in the second menu reviews the weakest ten; written there without help
+becomes weak. "Weak words" in the lessons reviews the weakest ten; written there without help
 a word is less weak. A step with three misses is done again. The level, the word and a word of
 encouragement show over the drawing when a word starts, then fade. The words are spoken (the speaker button, or Space while drawing; Sound in the settings turns
 that off). The pinyin
@@ -477,8 +513,7 @@ those panels, `CLAUDRALINGO_HANZI_STROKES=n` draws n strokes of the hanzi on the
 the word on its stroke n (`CLAUDRALINGO_STROKES_BASIC=n` describes the basic stroke n). The keys of the real keyboard are ignored
 during these runs.
 
-The help (`?` in the toolbar or F1) sums up the modes, the buttons and the keys, it opens by
-itself on the first start.
+The help (`?` in the toolbar or F1) shows the version and sums up the keys.
 
 ## Credits and license
 
@@ -492,6 +527,8 @@ itself on the first start.
   the strokes of cnchar-order (MIT), audio-cmn recordings (CC BY-SA), Noto Sans CJK SC (OFL), the
   stroke matching of Hanzi Writer (MIT), see
   `assets/hanzi/LICENSES.md`; the pinyin dictionary of `inputx-pinyin` (MIT or Apache-2.0).
+- The quotes (CC0-1.0, Quotables) and the affirmations (MIT, vowmi; ISC, motivations), see
+  `data/quotes/LICENSES.md`.
 - The words of the lessons: SCOWL 2020.12.07 by Kevin Atkinson (permissive, see
   `data/scowl/Copyright`), filtered by `scripts/prepare_words.py`.
 - The penmanship: the measurements and the letter sequences of the *Theory of Spencerian

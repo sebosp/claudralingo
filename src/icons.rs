@@ -30,15 +30,44 @@ pub enum Icon {
     Listen,
     /// A printer: the exercise on paper.
     Print,
+    /// A stopwatch: the time of an exercise.
+    Stopwatch,
+    /// A star: a grade gained.
+    Star,
+    /// The outline of a star: a grade not gained, an exercise not started.
+    StarEmpty,
+    /// A house: the main menu.
+    Home,
+    /// An arrow to the right: on to the next exercise.
+    Forward,
+    /// Two bars: the exercise waits.
+    Pause,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 6] = [Icon::Restart, Icon::Lessons, Icon::Stats, Icon::Settings, Icon::Listen, Icon::Print];
+    pub const ALL: [Icon; 12] = [
+        Icon::Restart,
+        Icon::Lessons,
+        Icon::Stats,
+        Icon::Settings,
+        Icon::Listen,
+        Icon::Print,
+        Icon::Stopwatch,
+        Icon::Star,
+        Icon::StarEmpty,
+        Icon::Home,
+        Icon::Forward,
+        Icon::Pause,
+    ];
 }
 
 /// The image node that shows an icon.
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct IconNode(pub Icon);
+
+/// The color of an icon, instead of the one of the text of the buttons.
+#[derive(Component, Debug, Clone)]
+pub struct IconTint(pub bevy::feathers::theme::ThemeToken);
 
 #[derive(Resource, Default)]
 pub struct Icons(Vec<(Icon, Handle<Image>)>);
@@ -80,17 +109,21 @@ fn render_icons(mut icons: ResMut<Icons>, mut images: ResMut<Assets<Image>>) {
         .collect();
 }
 
-/// The image of a new icon node, and the tint of all of them when the theme changes.
-fn set_icons(icons: Res<Icons>, theme: Res<UiTheme>, mut nodes: Query<(Ref<IconNode>, &mut ImageNode)>) {
-    let color = theme.color(&feathers_tokens::BUTTON_TEXT);
-    for (icon, mut node) in &mut nodes {
-        if icon.is_added()
+/// The image of a new or changed icon node, and the tint of all of them when the theme changes.
+fn set_icons(icons: Res<Icons>, theme: Res<UiTheme>, mut nodes: Query<(Ref<IconNode>, &mut ImageNode, Option<Ref<IconTint>>)>) {
+    for (icon, mut node, tint) in &mut nodes {
+        if icon.is_changed()
             && let Some((_, handle)) = icons.0.iter().find(|(i, _)| *i == icon.0)
+            && node.image != *handle
         {
             node.image = handle.clone();
         }
-        if (icon.is_added() || theme.is_changed()) && node.color != color {
-            node.color = color;
+        let tint_changed = tint.as_ref().is_some_and(|tint| tint.is_changed());
+        if icon.is_added() || theme.is_changed() || tint_changed {
+            let color = theme.color(tint.as_ref().map_or(&feathers_tokens::BUTTON_TEXT, |tint| &tint.0));
+            if node.color != color {
+                node.color = color;
+            }
         }
     }
 }
@@ -182,6 +215,39 @@ fn draw(icon: Icon) -> Pixmap {
                 pixmap.fill_path(&path, &paint, FillRule::EvenOdd, ts, None);
             }
         }
+        Icon::Stopwatch => {
+            // The dial and its hand, the button on top.
+            let (cx, cy, r) = (32.0, 36.0, 20.0);
+            if let Some(path) = PathBuilder::from_circle(cx, cy, r) {
+                pixmap.stroke_path(&path, &paint, &stroke, ts, None);
+            }
+            let mut pb = PathBuilder::new();
+            pb.move_to(cx, cy);
+            pb.line_to(cx + 8.0, cy - 9.0);
+            pb.move_to(25.0, 7.0);
+            pb.line_to(39.0, 7.0);
+            pb.move_to(32.0, 7.0);
+            pb.line_to(32.0, 15.0);
+            if let Some(path) = pb.finish() {
+                pixmap.stroke_path(&path, &paint, &stroke, ts, None);
+            }
+        }
+        Icon::Star | Icon::StarEmpty => {
+            let mut pb = PathBuilder::new();
+            for k in 0..10 {
+                let r = if k % 2 == 0 { 27.0 } else { 11.5 };
+                let a = -TAU / 4.0 + TAU * k as f32 / 10.0;
+                let (x, y) = (32.0 + r * a.cos(), 34.0 + r * a.sin());
+                if k == 0 { pb.move_to(x, y) } else { pb.line_to(x, y) }
+            }
+            pb.close();
+            if let Some(path) = pb.finish() {
+                if icon == Icon::Star {
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, ts, None);
+                }
+                pixmap.stroke_path(&path, &paint, &Stroke { width: 4.0, ..stroke.clone() }, ts, None);
+            }
+        }
         Icon::Print => {
             // A printer: the body, the sheet going in above, the sheet coming out below.
             let mut pb = PathBuilder::new();
@@ -214,6 +280,47 @@ fn draw(icon: Icon) -> Pixmap {
                 clear.set_color_rgba8(0, 0, 0, 0);
                 clear.blend_mode = tiny_skia::BlendMode::Source;
                 pixmap.fill_path(&path, &clear, FillRule::Winding, ts, None);
+            }
+        }
+        Icon::Home => {
+            // The roof, the walls and the door.
+            let mut pb = PathBuilder::new();
+            pb.move_to(9.0, 31.0);
+            pb.line_to(32.0, 10.0);
+            pb.line_to(55.0, 31.0);
+            pb.move_to(16.0, 26.0);
+            pb.line_to(16.0, 53.0);
+            pb.line_to(48.0, 53.0);
+            pb.line_to(48.0, 26.0);
+            pb.move_to(27.0, 53.0);
+            pb.line_to(27.0, 39.0);
+            pb.line_to(37.0, 39.0);
+            pb.line_to(37.0, 53.0);
+            if let Some(path) = pb.finish() {
+                pixmap.stroke_path(&path, &paint, &Stroke { width: 5.0, ..stroke.clone() }, ts, None);
+            }
+        }
+        Icon::Forward => {
+            // A shaft and its head.
+            let mut pb = PathBuilder::new();
+            pb.move_to(12.0, 32.0);
+            pb.line_to(50.0, 32.0);
+            pb.move_to(36.0, 18.0);
+            pb.line_to(50.0, 32.0);
+            pb.line_to(36.0, 46.0);
+            if let Some(path) = pb.finish() {
+                pixmap.stroke_path(&path, &paint, &stroke, ts, None);
+            }
+        }
+        Icon::Pause => {
+            let mut pb = PathBuilder::new();
+            for x in [18.0, 37.0] {
+                if let Some(rect) = Rect::from_ltrb(x, 14.0, x + 9.0, 50.0) {
+                    pb.push_rect(rect);
+                }
+            }
+            if let Some(path) = pb.finish() {
+                pixmap.fill_path(&path, &paint, FillRule::Winding, ts, None);
             }
         }
         Icon::Listen => {

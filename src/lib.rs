@@ -9,6 +9,8 @@ pub mod effects;
 pub mod game;
 pub mod hands;
 pub mod hanzi;
+pub mod history;
+pub mod home;
 pub mod icons;
 pub mod keyboard;
 pub mod klavaro;
@@ -19,6 +21,7 @@ pub mod penmanship;
 pub mod print;
 pub mod progress;
 pub mod prompt;
+pub mod quotes;
 pub mod shortcuts;
 pub mod sounds;
 pub mod stats;
@@ -45,6 +48,7 @@ impl Plugin for ClaudralingoPlugin {
             zoom::ZoomPlugin,
             (hanzi::HanziPlugin, penmanship::PenmanshipPlugin, icons::IconsPlugin, print::PrintPlugin),
             stats::StatsPlugin,
+            (home::HomePlugin, history::HistoryPlugin),
             sounds::SoundsPlugin,
         ));
     }

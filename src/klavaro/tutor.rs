@@ -73,6 +73,8 @@ pub struct Tutor {
     touch_times: Vec<f64>,
     last_touch: f64,
     start: f64,
+    /// Paused since then: the time stands still until [`Tutor::resume`].
+    paused_at: Option<f64>,
     pub results: Option<Results>,
     /// A slip is one error: the first wrong key counts, not the keys typed after it nor the
     /// ones typed again after backspace. Klavaro counts every character typed again.
@@ -102,6 +104,7 @@ impl Tutor {
             touch_times: Vec::new(),
             last_touch: 0.0,
             start: 0.0,
+            paused_at: None,
             results: None,
             one_error_per_slip: true,
             stop_on_error: false,
@@ -143,12 +146,29 @@ impl Tutor {
         self.query == Query::End || (self.retro_pos == 0 && self.cursor >= end)
     }
 
-    /// The elapsed time since the first touch.
+    /// The elapsed time since the first touch, without the pauses.
     pub fn elapsed(&self, now: f64) -> f64 {
         match (self.query, self.results) {
             (_, Some(results)) => results.elapsed,
             (Query::Start, _) => 0.0,
-            _ => now - self.start,
+            _ => self.paused_at.unwrap_or(now) - self.start,
+        }
+    }
+
+    /// The time stops at `at`, a moment after the last touch at most.
+    pub fn pause(&mut self, at: f64) {
+        if self.paused_at.is_none() && self.query == Query::ProcessTouches {
+            self.paused_at = Some(at.max(self.last_touch));
+        }
+    }
+
+    /// The time goes on from `now`: the pause counts neither in the elapsed time nor in the time
+    /// of the next touch.
+    pub fn resume(&mut self, now: f64) {
+        if let Some(at) = self.paused_at.take() {
+            let pause = (now - at).max(0.0);
+            self.start += pause;
+            self.last_touch += pause;
         }
     }
 
@@ -339,6 +359,23 @@ impl Tutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pause_counts_neither_in_the_time_nor_in_the_next_touch() {
+        let grid = KbdGrid::qwerty_us();
+        let mut accuracy = Accuracy::default();
+        let mut tutor = Tutor::new("ab");
+        tutor.process_touch('a', 10.0, &mut accuracy, &grid);
+        assert_eq!(tutor.elapsed(12.0), 2.0);
+        tutor.pause(10.0);
+        assert_eq!(tutor.elapsed(30.0), 0.0);
+        tutor.resume(30.0);
+        assert_eq!(tutor.elapsed(31.0), 1.0);
+        assert_eq!(tutor.process_touch('b', 31.0, &mut accuracy, &grid), Outcome::Finished);
+        let results = tutor.results.unwrap();
+        assert_eq!(results.elapsed, 1.0);
+        assert_eq!(tutor.touch_times, vec![0.0, 1.0]);
+    }
 
     fn type_str(tutor: &mut Tutor, s: &str, t: &mut f64, accur: &mut Accuracy) -> Outcome {
         let grid = KbdGrid::qwerty_us();

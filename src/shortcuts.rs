@@ -435,7 +435,7 @@ pub fn handle_shortcuts(
             continue;
         };
         if drill.finished.is_some() {
-            if chord.key == KeyName::Special(Special::Enter) {
+            if crate::game::continues(chord, coach.last_touch, now) {
                 new_exercise.write_default();
             }
             continue;
@@ -506,7 +506,6 @@ fn finish(drill: &mut Drill, progress: &mut Progress) {
     if !skipped.is_empty() {
         summary.push_str(&format!("\nNot on this keymap, done for you: {}", skipped.join(", ")));
     }
-    summary.push_str("\nEnter: another round");
     drill.summary = summary;
     current.sessions.push(Session {
         mode: ExerciseMode::Shortcuts,

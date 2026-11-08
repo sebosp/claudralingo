@@ -63,6 +63,63 @@ impl Grade {
     }
 }
 
+/// How far an exercise of the menu is, the star beside its name: not started, started (light
+/// blue, under 20% of the way to Legendary), then the colors of the grades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mastery {
+    NotStarted,
+    Started,
+    Reached(Grade),
+}
+
+impl Mastery {
+    pub fn token(self) -> ThemeToken {
+        match self {
+            Mastery::NotStarted => bevy::feathers::tokens::TEXT_DIM,
+            Mastery::Started => tokens::GRADE_STARTED,
+            Mastery::Reached(grade) => grade.token(),
+        }
+    }
+}
+
+/// The mastery of an exercise on the keyboard of the moment. A course counts its lessons, each
+/// Good 1, Great 2, Legendary 3, out of 3 per lesson: all Good is Good, all Legendary Legendary.
+/// The exercises without lessons take the best grade of their sessions.
+pub fn mastery(progress: &Progress, mode: ExerciseMode, layout: &Layout) -> Mastery {
+    let sessions = progress.layouts.get(progress.layout.key()).map(|l| l.sessions.as_slice()).unwrap_or_default();
+    if !sessions.iter().any(|s| s.mode == mode) {
+        return Mastery::NotStarted;
+    }
+    let lessons: Option<Vec<usize>> = match mode {
+        ExerciseMode::Basic => Some((1..=N_BASIC_LESSONS).collect()),
+        ExerciseMode::Layers => Some((1..=crate::course::layer_lessons(layout).len()).collect()),
+        ExerciseMode::Fingers => Some(FINGERS.iter().map(|f| *f as usize).collect()),
+        _ => None,
+    };
+    let goal = crate::game::goal(mode);
+    let points = |accuracy: Option<f64>| -> usize {
+        match accuracy.and_then(|a| Grade::of(a, goal)) {
+            Some(Grade::Good) => 1,
+            Some(Grade::Great) => 2,
+            Some(Grade::Legendary) => 3,
+            None => 0,
+        }
+    };
+    let (sum, n) = match lessons {
+        Some(lessons) => (lessons.iter().map(|l| points(best(sessions, mode, *l))).sum::<usize>(), lessons.len()),
+        None => (points(sessions.iter().filter(|s| s.mode == mode).map(|s| s.accuracy).reduce(f64::max)), 1),
+    };
+    if n == 0 || sum * 5 < n * 3 {
+        Mastery::Started
+    } else if sum < 2 * n {
+        Mastery::Reached(Grade::Good)
+    } else if sum < 3 * n {
+        Mastery::Reached(Grade::Great)
+    } else {
+        Mastery::Reached(Grade::Legendary)
+    }
+}
+
 /// Where a lesson stands.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
@@ -83,6 +140,10 @@ pub enum Go {
     Finger(u8),
     Hanzi(usize),
     Penmanship(usize),
+    /// An exercise without lessons of the touch typing.
+    Mode(ExerciseMode),
+    /// The review of the weak hanzi words.
+    HanziReview,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +162,9 @@ pub struct Lesson {
 pub struct Section {
     pub name: String,
     pub lessons: Vec<Lesson>,
+    /// Its lessons earn points, see [`points`]: not the free practice (the warm-up, your text,
+    /// the weak words).
+    pub scored: bool,
 }
 
 impl Section {
@@ -155,9 +219,42 @@ fn course(progress: &Progress, mode: ExerciseMode, titles: Vec<String>, unlocked
 /// The characters of a basic lesson on a tile, the long sets shortened.
 const MAX_TILE_CHARS: usize = 7;
 
+/// The points of a subject: each lesson Good 1, Great 2, Legendary 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Points {
+    pub earned: usize,
+    pub total: usize,
+    /// The lessons at Good or better, at Great or better, at Legendary: how full each part of
+    /// the bar is.
+    pub tiers: [usize; 3],
+    pub lessons: usize,
+}
+
+/// The points of the scored sections.
+pub fn points(sections: &[Section]) -> Points {
+    let mut points = Points::default();
+    for lesson in sections.iter().filter(|s| s.scored).flat_map(|s| &s.lessons) {
+        points.lessons += 1;
+        points.total += 3;
+        if let Status::Passed(grade) = lesson.status {
+            let n = grade as usize + 1;
+            points.earned += n;
+            for tier in &mut points.tiers[..n] {
+                *tier += 1;
+            }
+        }
+    }
+    points
+}
+
 /// The sections of the subject of the moment.
 pub fn sections(progress: &Progress, grid: &KbdGrid, layout: &Layout, hanzi: &HanziData) -> Vec<Section> {
-    match progress.mode.subject() {
+    subject_sections(progress, progress.mode.subject(), grid, layout, hanzi)
+}
+
+/// The sections of a subject.
+pub fn subject_sections(progress: &Progress, subject: Subject, grid: &KbdGrid, layout: &Layout, hanzi: &HanziData) -> Vec<Section> {
+    match subject {
         Subject::Typing => typing_sections(progress, grid, layout),
         Subject::Hanzi => hanzi_sections(progress, hanzi),
         Subject::Penmanship => {
@@ -166,6 +263,7 @@ pub fn sections(progress: &Progress, grid: &KbdGrid, layout: &Layout, hanzi: &Ha
             vec![Section {
                 name: "Small letters".into(),
                 lessons: course(progress, ExerciseMode::Penmanship, titles, pen.unlocked + 1, pen.lesson + 1, |l| Go::Penmanship(l - 1)),
+                scored: true,
             }]
         }
     }
@@ -184,12 +282,17 @@ fn typing_sections(progress: &Progress, grid: &KbdGrid, layout: &Layout) -> Vec<
             format!("{lesson}  {shown}")
         })
         .collect();
-    let mut sections = vec![Section { name: "Basic course".into(), lessons: course(progress, ExerciseMode::Basic, titles, basic_unlocked, basic_lesson, Go::Basic) }];
+    let mut sections =
+        vec![Section { name: "Basic course".into(), lessons: course(progress, ExerciseMode::Basic, titles, basic_unlocked, basic_lesson, Go::Basic), scored: true }];
     let layers = crate::course::layer_lessons(layout);
     if !layers.is_empty() {
         let (layer_lesson, layer_unlocked) = current.map_or((1, 1), |l| (l.layer_lesson, l.layer_unlocked));
         let titles = layers.iter().enumerate().map(|(i, l)| format!("{}  {}", i + 1, l.name)).collect();
-        sections.push(Section { name: "Layer course".into(), lessons: course(progress, ExerciseMode::Layers, titles, layer_unlocked, layer_lesson, Go::Layers) });
+        sections.push(Section {
+            name: "Layer course".into(),
+            lessons: course(progress, ExerciseMode::Layers, titles, layer_unlocked, layer_lesson, Go::Layers),
+            scored: true,
+        });
     }
     let sessions = current.map(|l| l.sessions.as_slice()).unwrap_or_default();
     let finger = current.map_or(FINGERS[0], |l| l.finger);
@@ -203,16 +306,43 @@ fn typing_sections(progress: &Progress, grid: &KbdGrid, layout: &Layout) -> Vec<
             go: Go::Finger(*f),
         })
         .collect();
-    sections.push(Section { name: "Finger drills".into(), lessons: fingers });
+    sections.push(Section { name: "Finger drills".into(), lessons: fingers, scored: true });
+    // The exercises without lessons, graded by their best session.
+    let mode_lesson = |mode: ExerciseMode| {
+        let best = sessions.iter().filter(|s| s.mode == mode).map(|s| s.accuracy).reduce(f64::max);
+        let status = match best {
+            Some(b) => Grade::of(b, crate::game::goal(mode)).map_or(Status::Below(b), Status::Passed),
+            None => Status::NotYet,
+        };
+        Lesson { title: mode.name().to_string(), cjk: None, status, current: progress.mode == mode, go: Go::Mode(mode) }
+    };
+    sections.push(Section { name: "Exercises".into(), lessons: EXERCISES.iter().map(|m| mode_lesson(*m)).collect(), scored: true });
+    sections.push(Section {
+        name: "Free practice".into(),
+        lessons: [ExerciseMode::Review, ExerciseMode::Custom].iter().map(|m| mode_lesson(*m)).collect(),
+        scored: false,
+    });
     sections
 }
+
+/// The exercises of the touch typing without lessons, in the section "Exercises".
+pub const EXERCISES: [ExerciseMode; 8] = [
+    ExerciseMode::Adaptability,
+    ExerciseMode::Velocity,
+    ExerciseMode::Fluidness,
+    ExerciseMode::Quotes,
+    ExerciseMode::Affirmations,
+    ExerciseMode::BounceLeft,
+    ExerciseMode::BounceRight,
+    ExerciseMode::Shortcuts,
+];
 
 fn hanzi_sections(progress: &Progress, data: &HanziData) -> Vec<Section> {
     let unlocked = crate::ui::hanzi_unlocked(progress);
     let mut sections: Vec<Section> = Vec::new();
     for (i, level) in data.levels.iter().enumerate() {
         if sections.last().is_none_or(|s| s.name != format!("HSK {}", level.hsk)) {
-            sections.push(Section { name: format!("HSK {}", level.hsk), lessons: Vec::new() });
+            sections.push(Section { name: format!("HSK {}", level.hsk), lessons: Vec::new(), scored: true });
         }
         let words: String = data.words[level.words.clone()].iter().take(4).map(|w| w.word.as_str()).collect::<Vec<_>>().join(" ");
         let status = match progress.hanzi.levels_done.get(&i) {
@@ -225,13 +355,29 @@ fn hanzi_sections(progress: &Progress, data: &HanziData) -> Vec<Section> {
             section.lessons.push(lesson);
         }
     }
+    let weak = crate::hanzi::weak_words(progress, data).len();
+    sections.push(Section {
+        name: "Review".into(),
+        lessons: vec![Lesson {
+            title: if weak == 0 { "Weak words".into() } else { format!("{weak} weak words") },
+            cjk: None,
+            status: Status::NotYet,
+            current: progress.mode == ExerciseMode::Hanzi && progress.hanzi.review,
+            go: Go::HanziReview,
+        }],
+        scored: false,
+    });
     sections
 }
 
 /// A click on a lesson: the mode and the lesson of the progress, the caller saves and starts
 /// the exercise.
 pub fn go(progress: &mut Progress, go: Go) {
+    progress.words_of = None;
     match go {
+        Go::Mode(mode) => progress.mode = mode,
+        // Started by the caller, it needs the words, see [`crate::hanzi::start_review`].
+        Go::HanziReview => progress.mode = ExerciseMode::Hanzi,
         Go::Basic(lesson) => {
             progress.mode = ExerciseMode::Basic;
             progress.current().basic_lesson = lesson;
@@ -283,6 +429,38 @@ mod tests {
     }
 
     #[test]
+    fn the_star_of_an_exercise_goes_from_gray_to_gold() {
+        let layout = LayoutId::QwertyUs.build();
+        let mut progress = Progress { layout: LayoutId::QwertyUs, ..Progress::default() };
+        let fingers: Vec<usize> = FINGERS.iter().map(|f| *f as usize).collect();
+        let mode = ExerciseMode::Fingers;
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::NotStarted);
+        // Tried and failed, then one drill out of many: under 20% of the way.
+        progress.current().sessions.push(session(mode, fingers[0], 50.0));
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::Started);
+        progress.current().sessions.push(session(mode, fingers[0], crate::drills::GOAL_ACCURACY));
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::Started);
+        // Every drill at the grade.
+        let every = |progress: &mut Progress, accuracy: f64| {
+            for f in &fingers {
+                progress.current().sessions.push(session(mode, *f, accuracy));
+            }
+        };
+        every(&mut progress, crate::drills::GOAL_ACCURACY);
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::Reached(Grade::Good));
+        every(&mut progress, 99.9);
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::Reached(Grade::Great));
+        every(&mut progress, 100.0);
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::Reached(Grade::Legendary));
+        // An exercise without lessons takes its best session.
+        progress.current().sessions.push(Session { lesson: None, ..session(ExerciseMode::Velocity, 0, 96.0) });
+        assert_eq!(mastery(&progress, ExerciseMode::Velocity, &layout), Mastery::Reached(Grade::Good));
+        // Another keyboard starts over.
+        progress.layout = LayoutId::ALL.into_iter().find(|l| *l != LayoutId::QwertyUs).unwrap();
+        assert_eq!(mastery(&progress, mode, &layout), Mastery::NotStarted);
+    }
+
+    #[test]
     fn the_basic_course_is_graded_locked_and_followed() {
         let layout = LayoutId::QwertyUs.build();
         let grid = crate::klavaro::KbdGrid::qwerty_us();
@@ -300,7 +478,10 @@ mod tests {
         }
         let sections = sections(&progress, &grid, &layout, &hanzi);
         // The QWERTY has a layer course of its symbols.
-        assert_eq!(sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Basic course", "Layer course", "Finger drills"]);
+        assert_eq!(
+            sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["Basic course", "Layer course", "Finger drills", "Exercises", "Free practice"]
+        );
         let basic = &sections[0];
         assert_eq!(basic.lessons.len(), N_BASIC_LESSONS);
         assert_eq!(basic.lessons[0].status, Status::Passed(Grade::Legendary));
@@ -322,6 +503,25 @@ mod tests {
         assert_eq!(sections[0].lessons[10].status, Status::Ahead { locked: false, next: "lesson 4".into() });
         go(&mut progress, Go::Basic(11));
         assert_eq!(progress.current().basic_lesson, 11);
+    }
+
+    #[test]
+    fn the_points_count_the_grades_of_the_scored_lessons() {
+        let lesson = |status| Lesson { title: String::new(), cjk: None, status, current: false, go: Go::Basic(1) };
+        let scored = Section {
+            name: "Basic course".into(),
+            lessons: vec![
+                lesson(Status::Passed(Grade::Good)),
+                lesson(Status::Passed(Grade::Legendary)),
+                lesson(Status::Below(80.0)),
+                lesson(Status::NotYet),
+            ],
+            scored: true,
+        };
+        let free = Section { name: "Free practice".into(), lessons: vec![lesson(Status::Passed(Grade::Great))], scored: false };
+        let points = points(&[scored, free]);
+        assert_eq!(points, Points { earned: 4, total: 12, tiers: [2, 1, 1], lessons: 4 });
+        assert_eq!(points.tiers.iter().sum::<usize>(), points.earned);
     }
 
     #[test]

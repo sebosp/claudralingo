@@ -70,6 +70,11 @@ const INTRO_STROKE: f32 = 0.55;
 const INTRO_END: f32 = 0.5;
 /// The word glows once a write is done, to sink in.
 const GLOW_SECONDS: f32 = 1.5;
+/// A write done, the word is written again before the eyes in green, as slowly as the intro,
+/// then flashes this many times, once a second, and fades out: the drawing is clean for the
+/// next write. See [`finale_looks`].
+const FINALE_FLASHES: f32 = 3.0;
+const FINALE_FADE: f32 = 2.0;
 /// The last brush stroke stays over the character, to compare its thickness.
 const ECHO_SECONDS: f32 = 1.4;
 /// The misses of a step that repeat it.
@@ -83,7 +88,11 @@ const CANVAS_MAX: f32 = 600.0;
 /// keep the drawing beside it.
 const SIDE: f32 = 380.0;
 const SIDE_MIN: f32 = 280.0;
-const WORD_FONT: f32 = 64.0;
+/// The word at the top of the column, smaller for the words of three characters or more.
+const WORD_FONT: f32 = 88.0;
+const LONG_WORD_FONT: f32 = 60.0;
+/// The feedback of the strokes, at the bottom of the column.
+const MESSAGE_FONT: f32 = 17.0;
 
 /// The steps of a word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -217,6 +226,8 @@ pub struct Practice {
     intro: Option<f32>,
     /// The seconds left of the glow of the word after a write.
     glow: f32,
+    /// The write just done, played again in green: the word and the seconds since it began.
+    finale: Option<(usize, f32)>,
     pub message: String,
     tone: Tone,
     /// The letters typed, or the digits of the nine keys.
@@ -295,7 +306,8 @@ struct NextLevelCaption;
 struct Banner;
 #[derive(Component, Default, Clone)]
 struct BannerText;
-/// The kind of the next stroke and, with the brush, how to write it.
+/// The strokes of the character: a line each, the name bold and its meaning plain, the next one
+/// with how to write it.
 #[derive(Component, Default, Clone)]
 struct KindText;
 /// A key of the nine keys: a digit, `<` for Backspace, ` ` to pick the first candidate, `x` to
@@ -385,6 +397,9 @@ pub fn view() -> impl Scene {
             }
             DrawingRow
             Children [
+                // As high as the drawing, its top level with the drawing's: the word in the
+                // top quarter, the strokes in the middle half, the feedback and the buttons in
+                // the bottom quarter. A section with more grows, the others keep their share.
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: px(12),
@@ -397,42 +412,54 @@ pub fn view() -> impl Scene {
                 Children [
                     // The word, its pinyin and its meaning.
                     Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: px(16),
-                        padding: UiRect::axes(px(16), px(10)),
-                        border_radius: BorderRadius::all(px(10)),
+                        flex_grow: 1.0,
+                        flex_basis: px(0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Start,
                     }
-                    ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
                     Children [
-                        Text("") WordText
-                        ThemeTextColor(feathers_tokens::TEXT_MAIN)
-                        --
                         Node {
-                            flex_direction: FlexDirection::Column,
-                            row_gap: px(4),
-                            flex_shrink: 1.0,
-                            min_width: px(0),
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: px(18),
+                            padding: UiRect::axes(px(16), px(10)),
+                            border_radius: BorderRadius::all(px(10)),
                         }
+                        ThemeBackgroundColor(feathers_tokens::WINDOW_BG)
                         Children [
-                            @label("") PinyinText
-                            TextFont { font_size: FontSize::Px(20.0) }
+                            Text("") WordText
+                            ThemeTextColor(feathers_tokens::TEXT_MAIN)
                             --
-                            @label_dim("") MeaningText
-                            TextFont { font_size: FontSize::Px(15.0) }
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                row_gap: px(4),
+                                flex_shrink: 1.0,
+                                min_width: px(0),
+                            }
+                            Children [
+                                @label("") PinyinText
+                                TextFont { font_size: FontSize::Px(26.0) }
+                                --
+                                @label_dim("") MeaningText
+                                TextFont { font_size: FontSize::Px(17.0) }
+                            ]
                         ]
                     ]
                     --
-                    // What to do now, and the stroke it is at.
-                    @label("") StageText
-                    TextFont { font_size: FontSize::Px(17.0) }
-                    --
-                    Text("") KindText
-                    ThemeTextColor(feathers_tokens::TEXT_DIM)
-                    --
-                    @label("") MessageText
-                    TextFont { font_size: FontSize::Px(15.0) }
-                    --
+                    // The strokes of the character, or the pinyin to type.
+                    Node {
+                        flex_grow: 2.0,
+                        flex_basis: px(0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(10),
+                    }
+                    Children [
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(5),
+                        }
+                        KindText
+                        --
                     Node {
                         display: Display::None,
                         flex_direction: FlexDirection::Column,
@@ -489,6 +516,22 @@ pub fn view() -> impl Scene {
                             -- @t9_key('<', "⌫") -- @t9_key(' ', "Pick") -- @t9_key('x', "Clear")
                         ]
                     ]
+                    ]
+                    --
+                    // What to do now and how the last stroke went, the buttons under them.
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: px(0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::End,
+                        row_gap: px(10),
+                    }
+                    Children [
+                    @label("") StageText
+                    TextFont { font_size: FontSize::Px(17.0) }
+                    --
+                    @label("") MessageText
+                    TextFont { font_size: FontSize::Px(MESSAGE_FONT) }
                     --
                     Node {
                         flex_direction: FlexDirection::Row,
@@ -525,6 +568,7 @@ pub fn view() -> impl Scene {
                         NextLevelButton
                         Node { display: Display::None }
                         on(next_level)
+                    ]
                     ]
                 ]
                 --
@@ -845,15 +889,43 @@ impl Speaker {
     }
 }
 
-/// Plays the recordings one after the other.
+/// What becomes of a word to say: said in the hanzi lesson, kept while the main menu is over it
+/// (said if the hanzi is picked there), dropped in the other subjects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Say {
+    Now,
+    Later,
+    Never,
+}
+
+fn when_to_say(mode: ExerciseMode, panel: crate::ui::Panel) -> Say {
+    match (mode, panel) {
+        (ExerciseMode::Hanzi, crate::ui::Panel::Home) => Say::Later,
+        (ExerciseMode::Hanzi, _) => Say::Now,
+        _ => Say::Never,
+    }
+}
+
+/// Plays the recordings one after the other, only in the hanzi lesson: the word of the last
+/// session is not said over the main menu at the start.
+#[allow(clippy::too_many_arguments)]
 fn speak(
     mut speaker: ResMut<Speaker>,
     data: Res<HanziData>,
     progress: Res<Progress>,
+    panel: Res<crate::ui::Panel>,
     mut sources: ResMut<Assets<AudioSource>>,
     players: Query<(), With<AudioPlayer>>,
     mut commands: Commands,
 ) {
+    match when_to_say(progress.mode, *panel) {
+        Say::Now => {}
+        Say::Later => return,
+        Say::Never => {
+            speaker.pending = None;
+            return;
+        }
+    }
     if let Some(word) = speaker.pending.take()
         && progress.sound
     {
@@ -961,8 +1033,9 @@ fn pen_down(
         return;
     }
     if let Some(p) = canvas_point(press.pointer.position, &window, &canvas) {
-        // The eager hand: the brush stops showing.
+        // The eager hand: the brush stops showing, the green word too.
         practice.intro = None;
+        practice.finale = None;
         practice.ink = vec![p];
         practice.ink_widths.clear();
         if progress.brush {
@@ -1094,8 +1167,10 @@ fn next_char(practice: &mut Practice, data: &HanziData, speaker: &mut Speaker) {
         }
         return;
     }
-    // The word written: it glows, to sink in, the message green with it.
+    // The word written: it glows, to sink in, the message green with it, and is written again
+    // in green on the drawing.
     practice.glow = GLOW_SECONDS;
+    practice.finale = Some((practice.word, 0.0));
     practice.tone = Tone::Good;
     // The step is done: again with many misses, else the next one.
     let stage = practice.stage;
@@ -1351,6 +1426,7 @@ fn auto_strokes(
         };
         let stroke = practice.stroke.min(glyph.medians.len() - 1);
         practice.intro = None;
+        practice.finale = None;
         practice.ink = glyph.medians[stroke].iter().map(|p| render::to_pixels(*p)).collect();
         // With the brush, as thick as the stroke: its profile.
         if progress.brush {
@@ -1373,11 +1449,52 @@ fn auto_strokes(
     }
 }
 
+/// The number of strokes of each character of a word.
+fn strokes_of(data: &HanziData, word: usize) -> Vec<usize> {
+    data.words.get(word).map_or(Vec::new(), |w| w.word.chars().map(|c| data.glyph(c).map_or(0, |g| g.medians.len())).collect())
+}
+
+/// The finale at `t` seconds: the character on the drawing and the looks of its strokes, `None`
+/// once it is over. Each character is written in turn as in the intro, then the last one
+/// flashes, its opacity from 1 to 0 and back once a second, and fades out.
+fn finale_looks(t: f32, strokes: &[usize]) -> Option<(usize, Vec<Look>)> {
+    let mut t = t.max(0.0);
+    for (i, n) in strokes.iter().enumerate() {
+        let length = *n as f32 * INTRO_STROKE + INTRO_END;
+        if t < length {
+            let at = (t / INTRO_STROKE) as usize;
+            let looks = (0..*n)
+                .map(|k| match k.cmp(&at) {
+                    std::cmp::Ordering::Less => Look::Reveal(1.0, 1.0),
+                    std::cmp::Ordering::Equal => Look::Reveal((t / INTRO_STROKE).fract(), 1.0),
+                    std::cmp::Ordering::Greater => Look::Hidden,
+                })
+                .collect();
+            return Some((i, looks));
+        }
+        t -= length;
+    }
+    let last = strokes.len().checked_sub(1)?;
+    let alpha = if t < FINALE_FLASHES {
+        0.5 + 0.5 * (std::f32::consts::TAU * t).cos()
+    } else if t < FINALE_FLASHES + FINALE_FADE {
+        1.0 - (t - FINALE_FLASHES) / FINALE_FADE
+    } else {
+        return None;
+    };
+    Some((last, vec![Look::Reveal(1.0, alpha); strokes[last]]))
+}
+
 fn fade(time: Res<Time>, progress: Res<Progress>, data: Res<HanziData>, mut practice: ResMut<Practice>) {
     let dt = time.delta_secs();
     if let Some(t) = practice.intro {
         let length = practice.intro_length(&data);
         practice.intro = (!progress.reduce_motion && t + dt < length).then_some(t + dt);
+        practice.dirty = true;
+    }
+    if let Some((word, t)) = practice.finale {
+        let strokes = strokes_of(&data, word);
+        practice.finale = (!progress.reduce_motion && finale_looks(t + dt, &strokes).is_some()).then_some((word, t + dt));
         practice.dirty = true;
     }
     if practice.glow > 0.0 {
@@ -1440,7 +1557,21 @@ fn draw_canvas(
         return;
     }
     practice.dirty = false;
-    let colors = breakdown::colors(&theme);
+    let mut colors = breakdown::colors(&theme);
+    // The write just done, again in green, over a clean drawing.
+    if let Some((word, t)) = practice.finale
+        && let Some((char_index, looks)) = finale_looks(t, &strokes_of(&data, word))
+        && let Some(glyph) = data.words.get(word).and_then(|w| w.word.chars().nth(char_index)).and_then(|c| data.glyph(c))
+    {
+        colors.next = theme.color(&tokens::CHAR_CORRECT);
+        let frame = render::Frame { looks: &looks, ..Default::default() };
+        render::draw(&mut canvas.pixmap, glyph, &frame, &colors);
+        let Canvas { image, pixmap } = &mut *canvas;
+        if let Some(mut image) = images.get_mut(image) {
+            image.data = Some(pixmap.data().to_vec());
+        }
+        return;
+    }
     let glyph = practice.current_char(&data).and_then(|c| data.glyph(c));
     let Canvas { image, pixmap } = &mut *canvas;
     match glyph {
@@ -1520,12 +1651,11 @@ fn update_view(
         }
     };
     // The word is hidden while it is written from memory, the pinyin while it is typed; after
-    // a write the word glows, bigger and green, then settles.
+    // a write the word glows green, at the same size: a bigger word pushed the column down.
     let glowing = practice.glow > 0.0;
-    let swell = 1.0 + 0.2 * (practice.glow / GLOW_SECONDS).clamp(0.0, 1.0).sqrt();
     for (entity, mut t, mut font) in &mut texts.p0() {
         set(&mut t, if memory { "？".repeat(word.word.chars().count()) } else { word.word.clone() });
-        let size = FontSize::Px((WORD_FONT * swell).round());
+        let size = FontSize::Px(if word.word.chars().count() > 2 { LONG_WORD_FONT } else { WORD_FONT });
         if font.font_size != size {
             font.font_size = size;
         }
@@ -1557,8 +1687,8 @@ fn update_view(
         if colored.1 != practice.tone {
             commands.entity(entity).insert(ThemeTextColor(practice.tone.token()));
         }
-        // Stronger with the word, then back to its size.
-        let size = FontSize::Px((15.0 * swell).round());
+        // One size: growing with the word it moved the lines under it.
+        let size = FontSize::Px(MESSAGE_FONT);
         if font.font_size != size {
             font.font_size = size;
         }
@@ -1709,9 +1839,15 @@ fn fit_canvas(
             node.height = px(canvas);
         }
     }
+    // Beside the drawing the column is as high as it, the bar of the writes included; under
+    // it, as high as its content.
+    let side_height = if beside { px(canvas + 14.0) } else { Val::Auto };
     for mut node in &mut nodes.p1() {
         if node.width != px(side) {
             node.width = px(side);
+        }
+        if node.min_height != side_height {
+            node.min_height = side_height;
         }
     }
     for mut node in &mut nodes.p2() {
@@ -1726,8 +1862,34 @@ fn fit_canvas(
     }
 }
 
-/// The kind of the next stroke while the outline is there to follow, and with the brush how to
-/// write it, its hanzi in the CJK font.
+/// A line of the strokes: the name bold (its hanzi and pinyin), what it is plain, how to write
+/// it under the next stroke; dim once written and for the strokes ahead.
+#[derive(Debug, Clone, PartialEq)]
+struct StrokeLine {
+    name: String,
+    what: String,
+    how: Option<String>,
+    next: bool,
+}
+
+/// The lines of the strokes of the character: with the outline to follow (or the stroke shown)
+/// all of them, else only the ones written, the others are for the memory.
+fn stroke_lines(kinds: &[&strokes::Kind], stroke: usize, shown: bool, brush: bool) -> Vec<StrokeLine> {
+    kinds
+        .iter()
+        .enumerate()
+        .take(if shown { kinds.len() } else { stroke })
+        .map(|(i, kind)| StrokeLine {
+            name: format!("{} {}", kind.hanzi, kind.pinyin),
+            what: kind.english.to_string(),
+            how: (i == stroke && brush).then(|| kind.brush.to_string()),
+            next: i == stroke,
+        })
+        .collect()
+}
+
+/// The strokes of the character as a list while it is written: where it is in the word, then a
+/// line per stroke. Rebuilt when they change.
 #[allow(clippy::too_many_arguments)]
 fn update_kind_text(
     practice: Res<Practice>,
@@ -1735,8 +1897,8 @@ fn update_kind_text(
     data: Res<HanziData>,
     font: Res<HanziFont>,
     asset_server: Res<AssetServer>,
-    texts: Query<Entity, With<KindText>>,
-    mut shown: Local<Option<String>>,
+    lists: Query<Entity, With<KindText>>,
+    mut shown: Local<Option<(String, Vec<StrokeLine>)>>,
     mut commands: Commands,
 ) {
     if !practice.is_changed() && !progress.is_changed() {
@@ -1746,31 +1908,47 @@ fn update_kind_text(
     // The kind of the stroke is a hint: with the outline to follow, or the stroke shown.
     let kind_shown = matches!(practice.stage, Stage::Trace | Stage::Faded) || practice.glimpse > 0.0;
     let n_chars = practice.word(&data).word.chars().count();
-    let text = match glyph.and_then(|g| g.kinds.get(practice.stroke).map(|k| (k, g.kinds.len()))) {
-        Some((kind, n)) if !practice.level_done && practice.stage != Stage::Pinyin && practice.intro.is_none() => {
-            let mut text = String::new();
+    let writing = !practice.level_done && practice.stage != Stage::Pinyin && practice.intro.is_none();
+    let (head, lines) = match glyph.filter(|_| writing) {
+        Some(glyph) => {
+            let n = glyph.kinds.len();
+            let mut head = String::new();
             if n_chars > 1 {
-                text.push_str(&format!("Character {} of {n_chars} · ", practice.char_index + 1));
+                head.push_str(&format!("Character {} of {n_chars}, ", practice.char_index + 1));
             }
-            text.push_str(&format!("Stroke {} of {n}", practice.stroke + 1));
-            if kind_shown {
-                text.push_str(&format!(" · {} {}, {}", kind.hanzi, kind.pinyin, kind.english));
-                if progress.brush {
-                    text.push_str(&format!("\n{}", kind.brush));
-                }
-            }
-            text
+            head.push_str(&format!("stroke {} of {n}", (practice.stroke + 1).min(n)));
+            (crate::ui::capitalize(&head), stroke_lines(&glyph.kinds, practice.stroke, kind_shown, progress.brush))
         }
-        _ => String::new(),
+        None => (String::new(), Vec::new()),
     };
-    if shown.as_ref() == Some(&text) {
+    if shown.as_ref().is_some_and(|(h, l)| *h == head && *l == lines) {
         return;
     }
-    let fonts = breakdown::Fonts { latin: asset_server.load(bevy::feathers::constants::fonts::REGULAR), cjk: font.0.clone() };
-    for entity in &texts {
-        fonts.fill(&mut commands, entity, &text, 14.0, feathers_tokens::TEXT_DIM);
+    let regular = breakdown::Fonts { latin: asset_server.load(bevy::feathers::constants::fonts::REGULAR), cjk: font.0.clone() };
+    let bold = breakdown::Fonts { latin: asset_server.load(bevy::feathers::constants::fonts::BOLD), cjk: font.0.clone() };
+    for list in &lists {
+        commands.entity(list).despawn_children();
+        if head.is_empty() {
+            continue;
+        }
+        regular.spawn(&mut commands, list, &head, 14.0, feathers_tokens::TEXT_DIM);
+        for line in &lines {
+            let ink = if line.next { feathers_tokens::TEXT_MAIN } else { feathers_tokens::TEXT_DIM };
+            let row = commands
+                .spawn((Node { flex_direction: FlexDirection::Row, column_gap: px(8), margin: UiRect::left(px(4)), ..default() }, Pickable::IGNORE, ChildOf(list)))
+                .id();
+            regular.spawn(&mut commands, row, "\u{2022}", 15.0, ink.clone());
+            let column = commands
+                .spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2), flex_shrink: 1.0, min_width: px(0), ..default() }, Pickable::IGNORE, ChildOf(row)))
+                .id();
+            let text = bold.spawn(&mut commands, column, &line.name, 15.0, ink.clone());
+            regular.append(&mut commands, text, &format!("  {}", line.what), 15.0, ink.clone());
+            if let Some(how) = &line.how {
+                regular.spawn(&mut commands, column, how, 14.0, feathers_tokens::TEXT_DIM);
+            }
+        }
     }
-    *shown = Some(text);
+    *shown = Some((head, lines));
 }
 
 /// The candidate buttons, in the CJK font, a click picks one.
@@ -1837,6 +2015,61 @@ fn update_candidates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_word_is_said_only_in_the_hanzi_lesson() {
+        use crate::ui::Panel;
+        assert_eq!(when_to_say(ExerciseMode::Hanzi, Panel::None), Say::Now);
+        assert_eq!(when_to_say(ExerciseMode::Hanzi, Panel::Strokes), Say::Now);
+        // The main menu at the start, over the hanzi of the last session: it waits.
+        assert_eq!(when_to_say(ExerciseMode::Hanzi, Panel::Home), Say::Later);
+        assert_eq!(when_to_say(ExerciseMode::Basic, Panel::None), Say::Never);
+        assert_eq!(when_to_say(ExerciseMode::Penmanship, Panel::Home), Say::Never);
+    }
+
+    #[test]
+    fn the_finale_writes_the_word_flashes_three_times_and_fades() {
+        let strokes = [2, 3];
+        let first = 2.0 * INTRO_STROKE + INTRO_END;
+        let second = 3.0 * INTRO_STROKE + INTRO_END;
+        // The first character, its first stroke half written.
+        assert_eq!(finale_looks(0.5 * INTRO_STROKE, &strokes), Some((0, vec![Look::Reveal(0.5, 1.0), Look::Hidden])));
+        // The second one, its first stroke written.
+        let (char_index, looks) = finale_looks(first + 1.5 * INTRO_STROKE, &strokes).unwrap();
+        assert_eq!(char_index, 1);
+        assert_eq!(looks[0], Look::Reveal(1.0, 1.0));
+        assert_eq!(looks[2], Look::Hidden);
+        // Then the flashes: whole at each second, gone in between.
+        let alpha = |t: f32| match finale_looks(first + second + t, &strokes) {
+            Some((1, looks)) => match looks[0] {
+                Look::Reveal(1.0, a) => a,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        };
+        assert!((alpha(0.0) - 1.0).abs() < 1e-4);
+        assert!(alpha(0.5) < 1e-4);
+        assert!((alpha(2.0) - 1.0).abs() < 1e-3);
+        // The fade, then a clean drawing.
+        assert!((alpha(FINALE_FLASHES + 1.0) - 0.5).abs() < 1e-3);
+        assert_eq!(finale_looks(first + second + FINALE_FLASHES + FINALE_FADE + 0.01, &strokes), None);
+        assert_eq!(finale_looks(0.0, &[]), None);
+    }
+
+    #[test]
+    fn the_strokes_ahead_are_listed_only_with_the_outline() {
+        let kinds: Vec<&strokes::Kind> = strokes::KINDS.iter().take(3).collect();
+        let shown = stroke_lines(&kinds, 1, true, true);
+        assert_eq!(shown.len(), 3);
+        assert!(shown[1].next && shown[1].how.is_some());
+        assert!(!shown[0].next && shown[0].how.is_none());
+        assert!(shown[0].name.starts_with(kinds[0].hanzi));
+        // From memory: the strokes written only, no hint of the next one.
+        let memory = stroke_lines(&kinds, 1, false, true);
+        assert_eq!(memory.len(), 1);
+        assert!(!memory[0].next);
+        assert!(stroke_lines(&kinds, 1, true, false).iter().all(|l| l.how.is_none()));
+    }
 
     #[test]
     fn a_new_word_is_written_before_the_eyes_and_the_writes_fill_the_bar() {

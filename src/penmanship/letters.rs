@@ -251,7 +251,7 @@ fn figure(name: &'static str, how: &'static str, strokes: Vec<Stroke>) -> Figure
 }
 
 /// The small letters, in the order of the copybooks.
-fn letter(c: char) -> Figure {
+pub fn letter(c: char) -> Figure {
     match c {
         'i' => figure("i", "right curve up, straight down, right curve up · 1-2-3, then the dot", vec![
             Pen::at(0.0, 0.0).right_curve(0.95, 1.0).down_turn(0.0).right_curve(2.0, 1.0).done(),

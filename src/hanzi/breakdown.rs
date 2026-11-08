@@ -227,6 +227,12 @@ impl Fonts {
     /// The spans of a text, under its root.
     pub fn fill(&self, commands: &mut Commands, root: Entity, text: &str, size: f32, color: bevy::feathers::theme::ThemeToken) {
         commands.entity(root).despawn_children();
+        self.append(commands, root, text, size, color);
+    }
+
+    /// The spans of a text after the ones of its root, for a part in another font: a bold name,
+    /// then its explanation.
+    pub fn append(&self, commands: &mut Commands, root: Entity, text: &str, size: f32, color: bevy::feathers::theme::ThemeToken) {
         let mut runs: Vec<(String, bool)> = Vec::new();
         for c in text.chars() {
             // The spaces and the punctuation stay in the run they are in.

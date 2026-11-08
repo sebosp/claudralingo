@@ -12,7 +12,7 @@ use crate::keyboard::{KeyCap, KeyRole, KeyboardView};
 use crate::klavaro::tutor::{CharState, Query as TutorQuery};
 use crate::prompt::{PromptChar, PromptView};
 use crate::theme::tokens;
-use crate::ui::{MessageText, VerdictText};
+use crate::ui::{MessageText, SummaryPane};
 
 const PRESS_SECONDS: f32 = 0.16;
 const SHAKE_SECONDS: f32 = 0.25;
@@ -209,7 +209,7 @@ fn celebrate(
     time: Res<Time>,
     theme: Res<UiTheme>,
     window: Single<&Window>,
-    verdicts: Query<(&UiGlobalTransform, &ComputedNode), With<VerdictText>>,
+    panes: Query<(&UiGlobalTransform, &ComputedNode), With<SummaryPane>>,
     mut show: ResMut<Show>,
     mut commands: Commands,
 ) {
@@ -218,9 +218,9 @@ fn celebrate(
     };
     show.age += time.delta_secs();
     let (width, height) = (window.width(), window.height());
-    // One soft burst from the verdict, rising, once the verdict is laid out: it shows up with
-    // the end of the exercise.
-    let message = verdicts.iter().find(|(_, node)| node.size().x > 0.0).map(|(transform, node)| center(transform, node));
+    // One soft burst from the summary, rising, once it is laid out: it shows up with the end of
+    // the exercise.
+    let message = panes.iter().find(|(_, node)| node.size().x > 0.0).map(|(transform, node)| center(transform, node));
     let burst = |commands: &mut Commands, at: Vec2, n: usize| {
         for _ in 0..n {
             let angle = -TAU / 4.0 + (fastrand::f32() - 0.5) * 2.4;

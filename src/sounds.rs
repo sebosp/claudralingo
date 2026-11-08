@@ -1,6 +1,7 @@
 //! The sounds of the typing (the setting "Sounds"): a bell on a miss, a short chime on a line
 //! typed without a slip, a rising chord on a passed exercise and a falling "uh-oh" for a key
-//! held too long by the auto shift. They are synthesized at the start, no files.
+//! held too long by the auto shift. And the key clicks (their own setting, off at first), in the
+//! sound of a blue, brown or red mechanical switch. They are synthesized at the start, no files.
 //!
 //! The advice of the auto shift is also shown over the text, where the eyes are while typing,
 //! not only above the keyboard.
@@ -8,6 +9,7 @@ use std::sync::Arc;
 
 use bevy::feathers::theme::{ThemeBackgroundColor, ThemeTextColor};
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::game::{Coach, Exercise, GameSystems, TouchResult, Touched};
 use crate::klavaro::tutor::{CharState, Query as TutorQuery};
@@ -28,6 +30,100 @@ pub enum Cue {
     Perfect,
 }
 
+/// The mechanical switch the key clicks sound like.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Switch {
+    /// Clicky: a sharp click as the key goes down, a second one as it comes back.
+    Blue,
+    /// Tactile: a soft tick at the bump, then the key bottoms out.
+    #[default]
+    Brown,
+    /// Linear: no click, a low thock at the bottom.
+    Red,
+}
+
+impl Switch {
+    pub const ALL: [Switch; 3] = [Switch::Blue, Switch::Brown, Switch::Red];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Switch::Blue => "Blue, clicky",
+            Switch::Brown => "Brown, tactile",
+            Switch::Red => "Red, linear",
+        }
+    }
+}
+
+/// The key clicks are softer than the cues, there is one per key.
+const CLICK_VOLUME: f32 = 0.2;
+
+/// A burst of noise through a one-pole filter: its start and decay in seconds, the coefficient
+/// of the low-pass (1 lets everything through), high-passed instead for the bright clicks.
+struct Burst {
+    start: f32,
+    decay: f32,
+    lowpass: f32,
+    highpass: bool,
+    amplitude: f32,
+}
+
+/// A ringing of the plastic: start, frequency, decay and amplitude.
+struct Ring(f32, f32, f32, f32);
+
+/// The click of a switch, from noise bursts and short rings, about 90 ms.
+fn click_samples(switch: Switch) -> Vec<f32> {
+    let burst = |start, decay, lowpass, highpass, amplitude| Burst { start, decay, lowpass, highpass, amplitude };
+    let (bursts, rings) = match switch {
+        Switch::Blue => (
+            vec![burst(0.0, 0.0012, 0.9, true, 1.0), burst(0.011, 0.0015, 0.8, true, 0.7), burst(0.0, 0.010, 0.15, false, 0.35)],
+            vec![Ring(0.0, 3400.0, 0.003, 0.35), Ring(0.011, 2900.0, 0.003, 0.25), Ring(0.002, 260.0, 0.012, 0.4)],
+        ),
+        Switch::Brown => (
+            vec![burst(0.0, 0.0018, 0.5, true, 0.45), burst(0.003, 0.012, 0.12, false, 0.6)],
+            vec![Ring(0.003, 210.0, 0.016, 0.7), Ring(0.0, 1800.0, 0.002, 0.15)],
+        ),
+        Switch::Red => (vec![burst(0.0, 0.010, 0.08, false, 0.6)], vec![Ring(0.0, 170.0, 0.02, 0.9), Ring(0.0, 1200.0, 0.0015, 0.08)]),
+    };
+    let n = (0.09 * SAMPLE_RATE as f32) as usize;
+    let mut samples = vec![0.0f32; n];
+    // The same noise every start: a xorshift.
+    let mut seed = 0x9e37_79b9u32 ^ (switch as u32 + 1).wrapping_mul(0x85eb_ca6b);
+    let mut noise = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+    };
+    for b in &bursts {
+        let mut low = 0.0f32;
+        for (i, sample) in samples.iter_mut().enumerate() {
+            let t = i as f32 / SAMPLE_RATE as f32 - b.start;
+            let x = noise();
+            low += b.lowpass * (x - low);
+            if t < 0.0 {
+                continue;
+            }
+            let envelope = (t / 0.0005).min(1.0) * (-t / b.decay).exp();
+            *sample += b.amplitude * envelope * if b.highpass { x - low } else { low };
+        }
+    }
+    for Ring(start, frequency, decay, amplitude) in &rings {
+        for (i, sample) in samples.iter_mut().enumerate() {
+            let t = i as f32 / SAMPLE_RATE as f32 - start;
+            if t >= 0.0 {
+                *sample += amplitude * (t / 0.0005).min(1.0) * (-t / decay).exp() * (std::f32::consts::TAU * frequency * t).sin();
+            }
+        }
+    }
+    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs())).max(1e-6);
+    let tail = (0.01 * SAMPLE_RATE as f32) as usize;
+    for (i, sample) in samples.iter_mut().enumerate() {
+        let fade = ((n - i) as f32 / tail as f32).min(1.0);
+        *sample *= CLICK_VOLUME * fade / peak;
+    }
+    samples
+}
+
 #[derive(Resource)]
 struct Sounds {
     miss: Handle<AudioSource>,
@@ -35,6 +131,8 @@ struct Sounds {
     line: Handle<AudioSource>,
     passed: Handle<AudioSource>,
     perfect: Handle<AudioSource>,
+    /// The clicks, in the order of [`Switch::ALL`].
+    clicks: Vec<Handle<AudioSource>>,
 }
 
 impl Sounds {
@@ -152,8 +250,10 @@ fn cue_samples(cue: Cue) -> Vec<f32> {
 }
 
 fn make_sounds(mut sources: ResMut<Assets<AudioSource>>, mut commands: Commands) {
+    let clicks = Switch::ALL.iter().map(|s| sources.add(AudioSource { bytes: Arc::from(wav(&click_samples(*s))) })).collect();
     let mut add = |cue| sources.add(AudioSource { bytes: Arc::from(wav(&cue_samples(cue))) });
     commands.insert_resource(Sounds {
+        clicks,
         miss: add(Cue::Miss),
         held: add(Cue::HeldTooLong),
         line: add(Cue::CleanLine),
@@ -181,6 +281,7 @@ fn play_cues(
     progress: Res<Progress>,
     sounds: Option<Res<Sounds>>,
     mut last: Local<(u64, usize, f64, bool)>,
+    mut clicks: Local<(u32, Option<(bool, Switch)>)>,
     mut commands: Commands,
 ) {
     let (last_id, last_cursor, last_flash, was_end) = &mut *last;
@@ -195,6 +296,21 @@ fn play_cues(
     *last_flash = flash;
 
     let mut cue = None;
+    // A click per key, a little higher or lower each time; one when the switch is picked.
+    let (count, setting) = &mut *clicks;
+    let picked = setting.is_some_and(|s| s != (progress.key_clicks, progress.switch));
+    *setting = Some((progress.key_clicks, progress.switch));
+    let n_clicks = touches.len() + usize::from(picked);
+    if progress.key_clicks
+        && let Some(sounds) = sounds.as_ref()
+        && let Some(click) = Switch::ALL.iter().position(|s| *s == progress.switch).and_then(|i| sounds.clicks.get(i))
+    {
+        for _ in 0..n_clicks {
+            *count = count.wrapping_add(1);
+            let speed = 0.94 + 0.12 * ((*count as f32 * 0.618_034).fract());
+            commands.spawn((AudioPlayer(click.clone()), PlaybackSettings::DESPAWN.with_speed(speed)));
+        }
+    }
     for touch in touches.read() {
         if touch.result == TouchResult::Wrong {
             // The first key of a slip rings, not the keys typed on after it.
@@ -296,6 +412,17 @@ fn show_advice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clicks_are_short_and_soft() {
+        for switch in Switch::ALL {
+            let samples = click_samples(switch);
+            assert!(samples.len() < SAMPLE_RATE as usize / 10);
+            assert!(samples.iter().all(|s| s.abs() <= CLICK_VOLUME + 1e-4));
+            assert!(samples.iter().any(|s| s.abs() > CLICK_VOLUME * 0.9));
+        }
+        assert_ne!(click_samples(Switch::Blue), click_samples(Switch::Red));
+    }
 
     #[test]
     fn the_sounds_are_short_wav_files() {
